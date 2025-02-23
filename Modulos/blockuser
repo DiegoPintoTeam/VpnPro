@@ -1,7 +1,7 @@
 #!/bin/bash           
 users_database="/root/usuarios.db"   
 block_userfun () {
-local USRloked="/etc/VPNPro/Exp"
+local USRloked="/etc/VPNPro/blockuser"
 if [[ $(cat ${USRloked}|grep -w "$1") ]]; then
 usermod -U "$1" &>/dev/null
 [[ -e ${USRloked} ]] && {
@@ -18,7 +18,7 @@ echo $1 >> ${USRloked}
 fi
 }
 block_user () {	
-local USRloked="/etc/VPNPro/Exp"
+local USRloked="/etc/VPNPro/blockuser"
 [[ ! -e ${USRloked} ]] && touch ${USRloked}
 clear
 echo -e "\E[44;1;37m                 BLOQUEO DE USUARIOS              \E[0m"
