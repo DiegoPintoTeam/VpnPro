@@ -1,0 +1,118 @@
+#!/bin/bash
+clear
+{
+tput setaf 7 ; tput setab 4 ; tput bold ; printf '%33s%s%-12s\n' "           CAMBIAR FECHA DE CADUCIDAD " ; tput sgr0
+echo ""
+tput setaf 7 ; tput bold 
+database="/root/usuarios.db"
+list_user=$(awk  -F : '$3 >=1000 {print  $1}'  /etc/passwd | grep -v "nobody" | sort)
+i=0
+i=0
+unset _userPass
+while read user; do
+	i=$(expr $i + 1)
+	_oP=$i
+	[[ $i == [1-9] ]] && i=0$i && oP+=" 0$i"
+	expire="$(chage -l $user | grep -E "Account expires" | cut -d ' ' -f3-)"
+	if [[ $expire == "never" ]]
+	then
+		echo -e "\033[1;31m[\033[1;32m$i\033[1;31m] \033[1;32m- \033[1;32m$user     \033[1;32m00/00/0000   S/FECHA\033[0m"
+	else
+		databr="$(date -d "$expire" +"%Y%m%d")"
+		hoje="$(date -d today +"%Y%m%d")"
+		if [ $hoje -ge $databr ]
+		then
+			_user=$(echo -e "\033[1;31m[\033[1;32m$i\033[1;31m] \033[1;32m- \033[1;32m$user\033[1;32m")
+			datanormal="$(echo -e "     \033[1;31m$(date -d"$expire" '+%d/%m/%Y')")"
+			expired=$(echo -e "      \033[1;31mCADUCADO\033[0m")
+			printf '%-62s%-20s%s\n' "$_user" "$datanormal" "$expired"
+			echo "exp" > /tmp/exp
+		else
+			_user=$(echo -e "\033[1;31m[\033[1;32m$i\033[1;31m] \033[1;32m- \033[1;32m$user\033[1;32m")
+			datanormal="$(echo -e "     \033[1;31m$(date -d"$expire" '+%d/%m/%Y')")"
+			ative=$(echo -e "      \033[1;32mVIGENCIA\033[0m")
+			printf '%-62s%-20s%s\n' "$_user" "$datanormal" "$ative"
+		fi
+	fi
+	_userPass+="\n${_oP}:${user}"
+done <<< "${list_user}"
+tput sgr0
+echo ""
+if [ -a /tmp/exp ]
+then
+	rm /tmp/exp
+fi
+num_user=$(awk -F: '$3>=1000 {print $1}' /etc/passwd | grep -v nobody | wc -l)
+echo -ne "\033[1;32mEscriba o selecione un usuario \033[1;31m[\033[1;31m1\033[1;31m-\033[1;31m$num_user\033[1;31m]\033[1;32m: " ; read option
+if [[ -z $option ]]
+then
+	echo ""
+	tput setaf 7 ; tput setab 4 ; tput bold ; echo "Error nombre de usuario vacio o invalido!" ; tput sgr0
+	exit 1
+fi
+usuario=$(echo -e "${_userPass}" | grep -E "\b$option\b" | cut -d: -f2)
+if [[ -z $usuario ]]
+then
+	echo ""
+	tput setaf 7 ; tput setab 4 ; tput bold ; echo "Error nombre de usuario vacio o invalido!" ; tput sgr0
+	echo ""
+	exit 1
+else
+	if [[ `grep -c /$usuario: /etc/passwd` -ne 0 ]]
+	then
+	    echo ""
+	    echo -ne "\033[1;32mNueva fecha usuario \033[1;31m$usuario: \033[1;32m"; read inputdate
+	    if [[ "$(echo -e "$inputdate" | grep -c "/")" = "0" ]]; then 
+	    	udata=$(date "+%d/%m/%Y" -d "+$inputdate days")
+	    	sysdate="$(echo "$udata" | awk -v FS=/ -v OFS=- '{print $3,$2,$1}')"
+	    else
+	    	udata=$(echo -e "$inputdate")
+	    	sysdate="$(echo "$inputdate" | awk -v FS=/ -v OFS=- '{print $3,$2,$1}')"
+	    fi
+		if (date "+%Y-%m-%d" -d "$sysdate" > /dev/null  2>&1)
+		then
+			if [[ -z $inputdate ]]
+			then
+				echo ""
+				tput setaf 7 ; tput setab 4 ; tput bold ;	echo "Fecha invalida!" ; tput sgr0
+	echo ""
+				exit 1	
+			else
+				if (echo $inputdate | egrep [^a-zA-Z] &> /dev/null)
+				then
+					today="$(date -d today +"%Y%m%d")"
+					timemachine="$(date -d "$sysdate" +"%Y%m%d")"
+					if [ $today -ge $timemachine ]
+					then
+						echo ""
+						tput setaf 7 ; tput setab 4 ; tput bold ;	echo "Fecha invalida!" ; tput sgr0
+	echo ""
+						exit 1
+					else
+						chage -E $sysdate $usuario
+						echo ""
+						tput setaf 7 ; tput setab 4 ; tput bold ; echo "Usuario $usuario con nueva fecha: $udata" ; tput sgr0
+						echo ""
+						exit 1
+					fi
+				else
+					echo ""
+					tput setaf 7 ; tput setab 4 ; tput bold ;	echo "Fecha invalida!" ; tput sgr0
+	echo ""
+					exit 1
+				fi
+			fi
+		else
+			echo ""
+			tput setaf 7 ; tput setab 4 ; tput bold ;	echo "Fecha invalida!" ; tput sgr0
+	echo ""
+			exit 1
+		fi
+	else
+		echo " "
+		tput setaf 7 ; tput setab 4 ; tput bold ;	echo "El usuario $usuario no existe!" ; tput sgr0
+		echo " "
+		exit 1
+	fi
+fi
+}

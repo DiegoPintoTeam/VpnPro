@@ -1,0 +1,66 @@
+#!/bin/bash
+clear
+{
+tput setaf 7 ; tput setab 4 ; tput bold ; printf '%35s%s%-10s\n' "          CAMBIAR CONTRASEÑA DE USUARIO " ; tput sgr0
+echo""
+_userT=$(awk  -F : '$3 >=1000 {print  $1}'  /etc/passwd | grep -v "nobody" | sort)
+i=0
+unset _userPass
+while read _user; do
+	i=$(expr $i + 1)
+	_oP=$i
+	[[ $i == [1-9] ]] && i=0$i && oP+=" 0$i"
+	if [[ -e "/etc/VPNPro/senha/$_user" ]]; then
+		_senha="$(cat /etc/VPNPro/senha/$_user)"
+	else
+		_senha='Null'
+	fi
+	suser=$(echo -e "\033[1;31m[\033[1;32m$i\033[1;31m] \033[1;32m- \033[1;32m$_user\033[0m")
+    ssenha=$(echo -e "\033[1;31mCONTRASEÑA\033[1;32m: $_senha")
+    printf '%-60s%s\n' "$suser" "$ssenha"
+	_userPass+="\n${_oP}:${_user}"
+done <<< "${_userT}"
+num_user=$(awk -F: '$3>=1000 {print $1}' /etc/passwd | grep -v nobody | wc -l)
+echo ""
+echo -ne "\033[1;32mEscriba o seleccione un usuario \033[1;31m[\033[1;31m1\033[1;31m-\033[1;31m$num_user\033[1;31m]\033[1;32m: " ; read option
+user=$(echo -e "${_userPass}" | grep -E "\b$option\b" | cut -d: -f2)
+if [[ -z $option ]]
+then
+	tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Campo vacio o invalido!" ; echo "" ; tput sgr0
+	exit 1
+elif [[ -z $user ]]
+then
+	tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Ingreso un nombre vacio o no valido!" ; echo "" ; tput sgr0
+	exit 1
+else
+	if [[ `grep -c /$user: /etc/passwd` -ne 0 ]]
+	then
+		echo -ne "\n\033[1;32mNueva contraseña \033[1;31m$user: "; read password
+		sizepass=$(echo ${#password})
+		if [[ $sizepass -lt 4 ]]
+		then
+			tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Contraseña vacia o inválida! usa al menos 4 caracteres" ; echo "" ; tput sgr0
+			exit 1
+		else
+			ps x | grep $user | grep -v grep | grep -v pt > /tmp/rem
+			if [[ `grep -c $user /tmp/rem` -eq 0 ]]
+			then
+				echo "$user:$password" | chpasswd
+				tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Contraseña $user ha sido cambiada: $password" ; echo "" ; tput sgr0
+				echo "$password" > /etc/VPNPro/senha/$user
+				exit 1
+			else
+				echo ""
+				tput setaf 7 ; tput setab 4 ; tput bold ; echo "Usuario conectado. Desconectando..." ; tput sgr0
+				pkill -f $user
+				echo "$user:$password" | chpasswd
+				tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "contraseña de $user ha sido cambiada: $password" ; echo "" ; tput sgr0
+				echo "$password" > /etc/VPNPro/senha/$user
+				exit 1
+			fi
+		fi
+	else
+		tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "El usuario $user no existe!" ; echo "" ; tput sgr0
+	fi
+fi
+}

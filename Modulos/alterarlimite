@@ -1,0 +1,73 @@
+#!/bin/bash
+clear
+{
+tput setaf 7 ; tput setab 4 ; tput bold ; printf '%20s%s\n' "     CAMBIAR LIMITE DE CONEXIONES SIMULTANEAS     " ; tput sgr0
+database="/root/usuarios.db"
+if [ ! -f "$database" ]; then
+	tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Archivo $database no encontrado" ; echo "" ; tput sgr0
+	exit 1
+else
+	tput setaf 3 ; tput bold ; 
+	echo ""
+	_userT=$(awk  -F : '$3 >=1000 {print $1}' /etc/passwd | grep -v "nobody" | sort)
+	i=0
+	unset _userPass
+	while read _user; do
+		i=$(expr $i + 1)
+		_oP=$i
+		[[ $i == [1-9] ]] && i=0$i && oP+=" 0$i"
+		if [[ "$(grep -wc "$_user" $database)" != "0" ]]; then
+			limit=$(grep -w "$_user" $database |cut -d' ' -f2)
+		else
+			limit='1'
+		fi
+		l_user=$(echo -e "\033[1;31m[\033[1;32m$i\033[1;31m] \033[1;32m- \033[1;32m$_user\033[0m")
+        lim=$(echo -e "\033[1;31mLimite\033[1;32m: $limit")
+        printf '%-65s%s\n' "$l_user" "$lim"
+		_userPass+="\n${_oP}:${_user}"
+	done <<< "${_userT}"
+	echo ""
+	num_user=$(awk -F: '$3>=1000 {print $1}' /etc/passwd | grep -v nobody | wc -l)
+	echo -ne "\033[1;32mEscriba o selecione un usuario \033[1;31m[\033[1;31m1\033[1;31m-\033[1;31m$num_user\033[1;31m]\033[1;32m: " ; read option
+	usuario=$(echo -e "${_userPass}" | grep -E "\b$option\b" | cut -d: -f2)
+    if [[ -z $option ]]; then
+        tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Usuario vacio o no existente!" ; echo "" ; tput sgr0
+		exit
+	elif [[ -z $usuario ]]; then
+		tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Usuario vacio o no existente!" ; echo "" ; tput sgr0
+		exit 1
+	else
+		if cat /etc/passwd |grep -w $usuario > /dev/null; then
+			echo -ne "\n\033[1;32mNuevo limite usuario \033[1;31m$usuario\033[1;32m: "; read sshnum
+			if [[ -z $sshnum ]]
+			then
+				tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Ingreso un numero invalido!" ; echo "" ; tput sgr0
+				exit 1
+			else
+				if (echo $sshnum | egrep [^1-9] &> /dev/null)
+				then
+					tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Ingreso un numero invalido!" ; echo "" ; tput sgr0
+					exit 1
+				else
+					if [[ $sshnum -lt 0 ]]
+					then
+						tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Debe ingresar un numero mayor a cero!" ; echo "" ; tput sgr0
+						exit 1
+					else
+						grep -v ^$usuario[[:space:]] /root/usuarios.db > /tmp/a
+						sleep 1s
+						mv /tmp/a /root/usuarios.db
+						echo $usuario $sshnum >> /root/usuarios.db
+						tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "Limite usuario $usuario ha sido: $sshnum" ; tput sgr0
+						sleep 2s
+						exit
+					fi
+				fi
+			fi			
+		else
+			tput setaf 7 ; tput setab 4 ; tput bold ; echo "" ; echo "El usuario $usuario no ha sido encontrado!" ; echo "" ; tput sgr0
+			exit 1
+		fi
+	fi
+fi
+}

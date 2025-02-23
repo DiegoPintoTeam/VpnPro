@@ -1,0 +1,104 @@
+#!/bin/bash
+clear
+{                                                                                                                                                                                                                                                                                                                                                                 
+USERS_DATABASE="/root/usuarios.db"
+tmp_now=$(printf '%(%H%M%S)T\n')                                                                  
+fun_drop () {                                                                                                   
+port_dropbear=`ps aux | grep dropbear | awk NR==1 | awk '{print $17;}'`                                         
+log=/var/log/auth.log                                                                                           
+loginsukses='Password auth succeeded'                                                                           
+clear                                                                                                           
+pids=`ps ax |grep dropbear |grep  " $port_dropbear" |awk -F" " '{print $1}'`                                    
+for pid in $pids                                                                                                
+do                                                                                                              
+    pidlogs=`grep $pid $log |grep "$loginsukses" |awk -F" " '{print $3}'`                                       
+    i=0                                                                                                         
+    for pidend in $pidlogs                                                                                      
+    do                                                                                                          
+      let i=i+1                                                                                                 
+    done                                                                                                        
+    if [ $pidend ];then                                                                                         
+       login=`grep $pid $log |grep "$pidend" |grep "$loginsukses"`                                              
+       PID=$pid                                                                                                 
+       user=`echo $login |awk -F" " '{print $10}' | sed -r "s/'/ /g"`                                           
+       waktu=`echo $login |awk -F" " '{print $1+0.45 " " $2 " " $3}'`                                                      
+       while [ ${#waktu} -lt 13 ]; do                                                                           
+           waktu=$waktu" "                                                                                      
+       done                                                                                                     
+       while [ ${#user} -lt 16 ]; do                                                                            
+           user=$user" "                                                                                        
+       done                                                                                                     
+       while [ ${#PID} -lt 8 ]; do                                                                              
+           PID=$PID" "                                                                                          
+       done                                                                                                     
+       echo "$user $PID $waktu"                                                                                 
+    fi                                                                                                          
+done                                                                                                            
+}                                                                                                               
+
+  while true; do                                                                                                
+    clear                                                                                                       
+    echo ""                                                                                                     
+    echo -e "\E[44;1;37m USUARIO         ESTADO       CO/LI      TIEMPO : \E[0m"                              
+    echo ""                                                                                                     
+    cat $USERS_DATABASE | sort | while read DB; do                                                              
+      DB1=$(echo $DB | cut -d " " -f1)                                                                          
+      DB2=$(ps -u $DB1 | grep sshd | wc -l)                                                                     
+      DB3=$(echo $DB | cut -d " " -f2)                                                                          
+      if [[ -e /etc/openvpn/openvpn-status.log ]]; then                                                         
+       DB4=$(cat /etc/openvpn/openvpn-status.log | grep -E ," $DB1", | wc -l)                                    
+      else                                                                                                      
+       DB4=0                                                                                                    
+      fi                                                                                                        
+      if netstat -nltp|grep 'dropbear'> /dev/null;then                                                          
+       DB5="$(fun_drop | grep " $DB1" | wc -l)"                                                                  
+      else                                                                                                      
+       DB5=0                                                                                                    
+      fi                                                                                                        
+      MONIT=$(($DB2 + $DB5))                                                                                    
+      MONIT2=$(($MONIT + $DB4))                                                                                                                                                                                           
+      PID=$(ps -u $DB1 | grep sshd | awk -F " " '{print $1}')                                                                                                                                                           
+      if [[ $MONIT -gt 0 ]]; then                                                                               
+          tst="$(ps -o etime $PID | sed -n '2p' | awk -F " " '{print $1}')"                                     
+          tst1=$(echo "$tst" | wc -c)                                                                           
+        if [[ "$tst1" == "9" ]]; then                                                                           
+          timerr="$(ps -o etime $PID | sed -n '2p' | awk -F " " '{print $1}')"                                  
+        else                                                                                                    
+          timerr="$(echo "--:$tst")"
+        fi
+        elif [[ $DB4 -gt 0 ]]; then                               
+          tmp2=$(printf '%(%H:%M:%S)T\n')                                                              
+          tmp1="$(grep -w " $DB1" /etc/openvpn/openvpn-status.log |awk '{print $4}'| head -1)"                   
+          [[ "$tmp1" = "" ]] && tmp1="--:--:--" && tmp2="--:--:--"                                              
+          var1=`echo $tmp1 | cut -c 1-2`
+          var2=`echo $tmp1 | cut -c 4-5`
+          var3=`echo $tmp1 | cut -c 7-8`
+          var4=`echo $tmp2 | cut -c 1-2`
+          var5=`echo $tmp2 | cut -c 4-5`
+          var6=`echo $tmp2 | cut -c 7-8`
+          calc1=`echo $var1*3600 + $var2*60 + $var3 | bc`
+          calc2=`echo $var4*3600 + $var5*60 + $var6 | bc`
+          seg=$(($calc2 - $calc1))
+          min=$(($seg/60))
+          seg=$(($seg-$min*60))
+          hor=$(($min/60))
+          min=$(($min-$hor*60))
+          timerusr=`printf "%02d:%02d:%02d \n" $hor $min $seg;`
+          timerr=$(echo "$timerusr" | sed -e 's/[^0-9:]//ig' )
+        else                                                                                                    
+          timerr="--:--:--"                                                                                     
+        fi                                                                                                                                                                                                                        
+      if [ "$MONIT2" -gt "0" ]; then      
+      status=$(echo -e "\033[1;37mINICIADO\033[1;32m      ")   
+      echo -ne "\033[1;32m"                                                                 
+      printf '%-17s%-14s%-10s%s\n' " $DB1"      "$status" "$MONIT2/$DB3" "$timerr"              
+      else                                                                                                                  
+       status=$(echo -e "\033[1;31mDETENIDO \033[1;32m     ")
+      echo -ne "\033[1;32m"                                                                 
+      printf '%-17s%-14s%-10s%s\n' " $DB1"      "$status" "$MONIT2/$DB3" "$timerr"                                                                                        
+      fi  
+      echo -e "\033[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"                                                                                                      
+    done                                                                                                        
+      exit                                                                                                  
+  done
+  }                                                                                                          
