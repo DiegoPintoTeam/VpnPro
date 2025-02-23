@@ -73,9 +73,11 @@
 			;;
 			*)
 			echo -e "\033[1;31mOpcao invalida !\033[0m"
-			sleep 2
-			;;
-			esac
-		done
-	fun_conexao
+			sleep 2s
+echo "" 
+exit 1
+fi
+fi
+fi
+
 }
