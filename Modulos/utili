@@ -76,3 +76,6 @@
 			sleep 2
 			;;
 			esac
+		done
+	fun_conexao
+}
