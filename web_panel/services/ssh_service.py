@@ -2366,24 +2366,6 @@ WantedBy=multi-user.target
             if opened_here:
                 self.disconnect()
 
-    def _kick_udp_custom_if_connected(self, username: str) -> tuple[bool, str]:
-        """Si el usuario tiene sesion reciente en UDP Custom, reinicia el servicio.
-
-        El binario no expone forma de cerrar una conexion individual (multiplexa
-        todo sobre un solo socket QUIC), asi que bloquear la cuenta no corta la
-        sesion ya autenticada. Reiniciar el servicio es la unica forma disponible
-        de forzar la desconexion; corta tambien a otros usuarios de UDP Custom en
-        este VPS, pero reconectan solos en segundos (systemd Restart=always).
-        """
-        ok_active, _, _ = self._run('systemctl is-active --quiet udp-custom.service')
-        if not ok_active:
-            return False, ''
-        normalized = (username or '').strip().upper()
-        if normalized not in self._collect_udp_custom_connections():
-            return False, ''
-        self._run('systemctl restart udp-custom.service >/dev/null 2>&1 || true')
-        return True, 'Sesion UDP Custom cortada (servicio reiniciado; otros usuarios reconectan solos).'
-
     def block_user(self, username: str) -> tuple[bool, str]:
         if not _USERNAME_RE.match(username):
             return False, 'Nombre de usuario inválido'
@@ -2410,11 +2392,7 @@ WantedBy=multi-user.target
                 if _is_disk_full_error(detail):
                     return False, _format_disk_full_message(detail)
                 return False, f"Error al bloquear usuario: {detail or 'sin detalle remoto'}"
-            result_msg = f"Usuario '{username}' bloqueado"
-            kicked, kick_msg = self._kick_udp_custom_if_connected(username)
-            if kicked:
-                result_msg = f'{result_msg}. {kick_msg}'
-            return True, result_msg
+            return True, f"Usuario '{username}' bloqueado"
         finally:
             if opened_here:
                 self.disconnect()
