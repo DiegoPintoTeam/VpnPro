@@ -1,0 +1,566 @@
+{% extends "base.html" %}
+{% block title %}Mis Usuarios · {{ reseller.username }}{% endblock %}
+
+{% block head %}
+{{ super() }}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4">
+  <div class="d-flex align-items-center justify-content-between w-100">
+    <h4 class="page-title mb-0"><i class="fas fa-user-group me-2 text-accent"></i>Mis Usuarios VPN</h4>
+  </div>
+</div>
+
+<div class="mb-3 text-muted small">
+  {{ reseller.total_connections_in_use }}/{{ reseller.max_connections }} conexiones ·
+  Créditos: <strong>{{ reseller.panel_credits or 0 }}</strong> ·
+  Servidor: <strong>{{ server.name if server else 'Sin asignar' }}</strong>
+</div>
+
+<form method="get" action="{{ url_for('reseller.users') }}" class="row g-2 mb-3">
+  <div class="col-12 col-md-6">
+    <input type="text" name="q" value="{{ filter_q or '' }}" class="form-control form-control-sm" placeholder="Buscar usuario...">
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="state" class="form-select form-select-sm">
+      <option value="" {{ 'selected' if not filter_state else '' }}>Todos</option>
+      <option value="active" {{ 'selected' if filter_state == 'active' else '' }}>Activos</option>
+      <option value="blocked" {{ 'selected' if filter_state == 'blocked' else '' }}>Bloqueados</option>
+      <option value="expired" {{ 'selected' if filter_state == 'expired' else '' }}>Expirados</option>
+    </select>
+  </div>
+  <div class="col-6 col-md-3 d-flex gap-2">
+    <button type="submit" class="btn btn-sm btn-accent w-100">Buscar</button>
+    <a href="{{ url_for('reseller.users') }}" class="btn btn-sm btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<div class="vpn-card mb-4">
+  <div class="vpn-card-header" role="button" data-bs-toggle="collapse" data-bs-target="#formNewUserReseller">
+    <i class="fas fa-circle-plus me-2 text-accent"></i>Crear Usuario VPN
+    <i class="fas fa-chevron-down ms-auto"></i>
+  </div>
+  <div class="collapse" id="formNewUserReseller">
+    <div class="vpn-card-body">
+      <form method="POST" id="resellerCreateUserForm" action="{{ url_for('reseller.create_user') }}" class="row g-3 js-ajax-user-action" data-notice-server-name="{{ server.name if server else 'Sin asignar' }}">
+        <div class="col-md-6">
+          <label class="form-label">Usuario</label>
+          <input type="text" name="username" class="form-control"
+                 required maxlength="30" minlength="3"
+               pattern="^[A-Z]+-[A-Z]+(?:-[0-9]{2})?$"
+                 autocapitalize="characters" style="text-transform: uppercase;"
+                 placeholder="NOMBRE-APELLIDO"
+               title="Usa formato NOMBRE-APELLIDO o NOMBRE-APELLIDO-00 en MAYUSCULAS">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Contraseña</label>
+          <div class="input-group">
+            <input type="password" name="password" class="form-control form-password-input"
+                   placeholder="••••••••" required minlength="4" maxlength="50">
+            <button class="btn btn-outline-secondary btn-toggle-pwd-form" type="button"
+                    title="Mostrar/Ocultar" aria-label="Mostrar u ocultar contraseña">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Paquete</label>
+          <select name="package" class="form-select" required>
+            {% for code, pkg in package_options.items() %}
+            <option value="{{ code }}" {{ 'selected' if code == 'demo_1h' else '' }}>
+              {% if code == 'demo_1h' %}
+              Demo 1 hora (mínimo 5 créditos disponibles)
+              {% else %}
+              {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
+              {% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Límite de conexiones</label>
+          <input type="number" name="limit" class="form-control"
+                 required min="1" max="{{ reseller.max_connections }}" value="1">
+          <small class="text-muted d-block mt-2">
+            Máximo permitido por admin: {{ reseller.max_connections }} conexión(es) por usuario.
+          </small>
+        </div>
+        <div class="col-12 text-end">
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-plus me-1"></i>Crear
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="vpn-card">
+  <div class="vpn-card-body p-0">
+    {% if users %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0 users-mobile-cards users-table-reseller" id="usersTable">
+        <thead>
+          <tr>
+            <th>Usuario</th><th>Contraseña</th><th>Límite</th>
+            <th>Expira</th><th>Días rest.</th><th>Estado</th>
+            <th>En línea</th><th style="width: 150px;" class="text-nowrap">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr id="row-{{ u.id }}" data-user-state="{{ 'blocked' if u.is_blocked else ('expired' if u.is_expired else 'active') }}">
+            <td class="fw-semibold text-light">
+              {{ u.username }}
+              {% if u.username.startswith('DEMO-') %}
+              <span class="badge bg-info text-dark ms-1">DEMO</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="pwd-hidden" data-pwd="{{ u.password }}">••••••</span>
+              <button class="btn btn-link btn-sm p-0 ms-1 text-muted btn-show-pwd" title="Mostrar">
+                <i class="fas fa-eye fa-xs"></i>
+              </button>
+            </td>
+            <td class="js-user-limit">{{ u.connection_limit }}</td>
+            <td class="js-user-expiry">{{ u.expiry_date.strftime('%d/%m/%Y') }}</td>
+            <td class="js-user-days">
+              {% if u.is_expired %}
+                <span class="text-danger fw-bold">Expirado</span>
+              {% elif u.days_remaining <= 3 %}
+                <span class="badge bg-warning text-dark">{{ u.days_remaining }} día(s)</span>
+              {% else %}
+                <span class="text-success">{{ u.days_remaining }} día(s)</span>
+              {% endif %}
+            </td>
+            <td class="user-state-cell" data-user="{{ u.username|upper }}">
+              {% if u.is_blocked %}
+              <span class="badge bg-warning text-dark user-state-badge">Bloqueado</span>
+              {% else %}
+              <span class="badge {{ 'bg-danger' if u.is_expired else 'bg-success' }} user-state-badge">
+                {{ 'Expirado' if u.is_expired else 'Activo' }}
+              </span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="online-badge text-muted" data-user="{{ u.username }}">—</span>
+            </td>
+            <td class="text-nowrap">
+              <div class="inline-actions">
+                <button type="button" class="btn btn-link text-muted btn-show-pwd d-md-none icon-btn"
+                        title="Mostrar contraseña">
+                  <i class="fas fa-eye"></i>
+                </button>
+                <button class="btn btn-info btn-open-pwd-modal icon-btn" title="Cambiar contraseña"
+                  data-bs-toggle="modal" data-bs-target="#pwdModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}">
+                  <i class="fas fa-key"></i>
+                </button>
+                <button class="btn btn-warning btn-open-limit-modal icon-btn" title="Cambiar límite"
+                  data-bs-toggle="modal" data-bs-target="#limitModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                  data-limit="{{ u.connection_limit }}">
+                  <i class="fas fa-sliders"></i>
+                </button>
+                <button class="btn btn-success btn-open-expiry-modal icon-btn" title="Renovar"
+                  data-bs-toggle="modal" data-bs-target="#expiryModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                  data-expiry="{{ u.expiry_date.strftime('%d/%m/%Y %H:%M') }}"
+                  data-is-expired="{{ 1 if u.is_expired else 0 }}"
+                  data-days-remaining="{{ u.days_remaining }}">
+                  <i class="fas fa-calendar-plus"></i>
+                </button>
+                {% if u.is_blocked %}
+                    <form method="POST" action="{{ url_for('reseller.unblock_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+                      data-confirm-scope="USUARIOS VPN"
+                      data-msg="¿Desbloquear el usuario '{{ u.username }}'?">
+                  <button type="submit" class="btn btn-success icon-btn" title="Desbloquear usuario">
+                    <i class="fas fa-lock-open"></i>
+                  </button>
+                </form>
+                {% else %}
+                    <form method="POST" action="{{ url_for('reseller.block_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+                      data-confirm-scope="USUARIOS VPN"
+                      data-msg="¿Bloquear el usuario '{{ u.username }}'? Se cerrarán sus sesiones activas.">
+                  <button type="submit" class="btn btn-warning icon-btn" title="Bloquear usuario">
+                    <i class="fas fa-user-lock"></i>
+                  </button>
+                </form>
+                {% endif %}
+                <form method="POST" action="{{ url_for('reseller.checkuser_clear_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action inline-action-form"
+                  data-confirm-scope="CHECKUSER"
+                  data-msg="¿Limpiar dispositivos CheckUser del usuario '{{ u.username }}'? Esto cerrará sus sesiones activas.">
+                  <button type="submit" class="btn btn-cyan icon-btn" title="Limpiar dispositivos CheckUser">
+                    <i class="fas fa-mobile-alt"></i>
+                  </button>
+                </form>
+                <button type="button" class="btn btn-danger btn-delete-user icon-btn"
+                        data-user-id="{{ u.id }}" data-username="{{ u.username }}"
+                        data-delete-url="{{ url_for('reseller.delete_user', user_id=u.id) }}"
+                        title="Eliminar">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top border-card">
+      <small class="text-muted">Mostrando {{ users|length }} de {{ total }} usuario(s) activos.</small>
+      {% if pages > 1 %}
+      <nav aria-label="Paginación usuarios reseller">
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item {{ 'disabled' if not has_prev else '' }}">
+            <a class="page-link" href="{{ url_for('reseller.users', page=page-1, per_page=per_page, q=filter_q, state=filter_state) }}">Anterior</a>
+          </li>
+          <li class="page-item disabled"><span class="page-link">Página {{ page }} de {{ pages }}</span></li>
+          <li class="page-item {{ 'disabled' if not has_next else '' }}">
+            <a class="page-link" href="{{ url_for('reseller.users', page=page+1, per_page=per_page, q=filter_q, state=filter_state) }}">Siguiente</a>
+          </li>
+        </ul>
+      </nav>
+      {% endif %}
+    </div>
+    {% else %}
+      <div class="text-center py-5 text-muted">
+        <i class="fas fa-user-group fa-3x mb-3 d-block opacity-25"></i>
+        <p>No hay usuarios VPN registrados.</p>
+        <button class="btn btn-accent" data-bs-toggle="collapse" data-bs-target="#formNewUserReseller">
+          <i class="fas fa-user-plus me-2"></i>Crear primer usuario
+        </button>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="pwdModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h6 class="modal-title"><i class="fas fa-key me-2 text-accent"></i><span id="pwdModalTitle">Contraseña</span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="pwdModalForm" class="js-ajax-user-action" action="{{ url_for('reseller.change_password', user_id=999999) }}">
+        <div class="modal-body">
+          <label class="form-label-dark">Nueva contraseña</label>
+          <input type="text" name="password" class="form-control form-control-dark" placeholder="Nueva contraseña" required minlength="4" maxlength="50">
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent btn-sm">Cambiar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="limitModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h6 class="modal-title"><i class="fas fa-sliders me-2 text-accent"></i><span id="limitModalTitle">Límite</span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="limitModalForm" class="js-ajax-user-action" action="{{ url_for('reseller.change_limit', user_id=999999) }}">
+        <div class="modal-body">
+          <label class="form-label-dark">Conexiones simultáneas</label>
+          <input type="number" name="limit" id="limitModalInput" class="form-control form-control-dark" value="1" required min="1" max="{{ reseller.max_connections }}">
+          <small class="text-muted d-block mt-2">
+            Solo puedes aumentar este límite si el administrador te asignó suficientes conexiones.
+          </small>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent btn-sm">Cambiar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="expiryModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h6 class="modal-title"><i class="fas fa-calendar-plus me-2 text-accent"></i><span id="expiryModalTitle">Renovar</span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="expiryModalForm" class="js-ajax-user-action" action="{{ url_for('reseller.change_expiry', user_id=999999) }}">
+        <div class="modal-body">
+          <p class="text-muted mb-3" id="expiryModalInfo"></p>
+          <label class="form-label-dark">Paquete de renovación</label>
+          <select class="form-select" name="package" required>
+            {% for code, pkg in package_options.items() %}
+            {% if code != 'demo_1h' %}
+            <option value="{{ code }}" {{ 'selected' if code == '1m' else '' }}>
+              {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
+            </option>
+            {% endif %}
+            {% endfor %}
+          </select>
+          <small class="text-muted d-block mt-2">
+            Se sumará el tiempo al vencimiento actual. Si ya expiró, comenzará desde hoy.
+          </small>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent btn-sm">Renovar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script>
+let usersTableInstance;
+
+$(document).ready(function () {
+  usersTableInstance = $('#usersTable').DataTable({
+    language: { url: '//cdn.datatables.net/plug-ins/1.13.8/i18n/es-ES.json' },
+    order: [[3, 'asc']],
+    paging: false,
+    info: false,
+    searching: false,
+    columnDefs: [{ orderable: false, targets: [1, 6, 7] }]
+  });
+});
+
+const pwdActionTemplate = `{{ url_for('reseller.change_password', user_id=999999) }}`;
+const limitActionTemplate = `{{ url_for('reseller.change_limit', user_id=999999) }}`;
+const expiryActionTemplate = `{{ url_for('reseller.change_expiry', user_id=999999) }}`;
+const resellerBlockActionTemplate = `{{ url_for('reseller.block_user', user_id=999999) }}`;
+const resellerUnblockActionTemplate = `{{ url_for('reseller.unblock_user', user_id=999999) }}`;
+const resellerCheckuserClearTemplate = `{{ url_for('reseller.checkuser_clear_user', user_id=999999) }}`;
+
+function renderUserRowHtml(user) {
+  const isDemo = String(user.username || '').startsWith('DEMO-');
+  const usernameBadge = isDemo ? '<span class="badge bg-info text-dark ms-1">DEMO</span>' : '';
+  const blockAction = window.buildUserBlockAction({
+    user,
+    blockActionTemplate: resellerBlockActionTemplate,
+    unblockActionTemplate: resellerUnblockActionTemplate,
+  });
+
+  return `
+    <td class="fw-semibold text-light">
+      ${user.username}
+      ${usernameBadge}
+    </td>
+    <td>
+      <span class="pwd-hidden" data-pwd="${user.password || ''}">••••••</span>
+      <button class="btn btn-link btn-sm p-0 ms-1 text-muted btn-show-pwd" title="Mostrar">
+        <i class="fas fa-eye fa-xs"></i>
+      </button>
+    </td>
+    <td class="js-user-limit">${user.connection_limit || 1}</td>
+    <td class="js-user-expiry">${user.expiry_date || ''}</td>
+    <td class="js-user-days">${window.renderUserDaysCell(user)}</td>
+    <td class="user-state-cell" data-user="${(user.username || '').toUpperCase()}">
+      <span class="badge ${user.is_blocked ? 'bg-warning text-dark' : (user.is_expired ? 'bg-danger' : 'bg-success')} user-state-badge">
+        ${user.is_blocked ? 'Bloqueado' : (user.is_expired ? 'Expirado' : 'Activo')}
+      </span>
+    </td>
+    <td>
+      <span class="online-badge text-muted" data-user="${user.username}">—</span>
+    </td>
+    <td class="text-nowrap">
+      <div class="inline-actions">
+        <button type="button" class="btn btn-link text-muted btn-show-pwd d-md-none icon-btn"
+          title="Mostrar contraseña">
+          <i class="fas fa-eye"></i>
+        </button>
+        <button class="btn btn-info btn-open-pwd-modal icon-btn" title="Cambiar contraseña"
+          data-bs-toggle="modal" data-bs-target="#pwdModalGlobal"
+          data-user-id="${user.id}"
+          data-username="${user.username}">
+          <i class="fas fa-key"></i>
+        </button>
+        <button class="btn btn-warning btn-open-limit-modal icon-btn" title="Cambiar límite"
+          data-bs-toggle="modal" data-bs-target="#limitModalGlobal"
+          data-user-id="${user.id}"
+          data-username="${user.username}"
+          data-limit="${user.connection_limit || 1}">
+          <i class="fas fa-sliders"></i>
+        </button>
+        <button class="btn btn-success btn-open-expiry-modal icon-btn" title="Renovar"
+          data-bs-toggle="modal" data-bs-target="#expiryModalGlobal"
+          data-user-id="${user.id}"
+          data-username="${user.username}"
+          data-expiry="${user.expiry_datetime || ''}"
+          data-is-expired="${user.is_expired ? '1' : '0'}"
+          data-days-remaining="${user.days_remaining || 0}">
+          <i class="fas fa-calendar-plus"></i>
+        </button>
+        <form method="POST" action="${blockAction.action}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+          data-confirm-scope="USUARIOS VPN"
+          data-msg="${blockAction.msg}">
+          <button type="submit" class="${blockAction.btnClass} icon-btn" title="${blockAction.title}">
+            <i class="${blockAction.icon}"></i>
+          </button>
+        </form>
+        <form method="POST" action="${resellerCheckuserClearTemplate.replace('999999', user.id)}" class="form-confirm js-ajax-user-action inline-action-form"
+          data-confirm-scope="CHECKUSER"
+          data-msg="¿Limpiar dispositivos CheckUser del usuario '${user.username}'? Esto cerrará sus sesiones activas.">
+          <button type="submit" class="btn btn-cyan icon-btn" title="Limpiar dispositivos CheckUser">
+            <i class="fas fa-mobile-alt"></i>
+          </button>
+        </form>
+        <button type="button" class="btn btn-danger btn-delete-user icon-btn"
+          data-user-id="${user.id}" data-username="${user.username}"
+          data-delete-url="${`{{ url_for('reseller.delete_user', user_id=999999) }}`.replace('999999', String(user.id))}"
+          title="Eliminar">
+          <i class="fas fa-trash"></i>
+        </button>
+      </div>
+    </td>
+  `;
+}
+
+function addOrReplaceRow(user, submitted) {
+  if (!user || !user.id) return;
+  let row = document.getElementById(`row-${user.id}`);
+  if (!row) {
+    row = document.createElement('tr');
+    row.id = `row-${user.id}`;
+    row.dataset.userState = user.is_blocked ? 'blocked' : (user.is_expired ? 'expired' : 'active');
+    row.innerHTML = renderUserRowHtml({ ...user, password: (submitted && submitted.password) || user.password || '' });
+
+    if (usersTableInstance) {
+      usersTableInstance.row.add(row).draw(false);
+    } else {
+      const tbody = document.querySelector('#usersTable tbody');
+      if (tbody) tbody.prepend(row);
+    }
+  } else {
+    updateRowFromUser(user);
+  }
+
+  bindDynamicRowActions();
+}
+
+function bindDynamicRowActions() {
+  if (typeof window.initFormPasswordToggle === 'function') {
+    window.initFormPasswordToggle();
+  }
+  if (typeof window.initPasswordToggleBindings === 'function') {
+    window.initPasswordToggleBindings({ buttonSelector: '.btn-show-pwd' });
+  }
+  if (typeof window.initUserModalBindings === 'function') {
+    window.initUserModalBindings({
+      pwdActionTemplate,
+      limitActionTemplate,
+      renewActionTemplate: expiryActionTemplate,
+      renewInfoBuilder: window.buildUserRenewInfo,
+    });
+  }
+  if (typeof window.initAjaxUserDeletion === 'function') {
+    window.initAjaxUserDeletion({
+      getDeleteUrl: (btn) => btn.dataset.deleteUrl || '',
+      getUsername: (btn) => btn.dataset.username || '',
+      removeRow: (btn) => window.removeUserRow(btn, usersTableInstance),
+    });
+  }
+  if (typeof window.initAjaxUserActionForms === 'function') {
+    window.initAjaxUserActionForms({
+      selector: '.js-ajax-user-action',
+      onSuccess: ({ form, data, submitted }) => {
+        if (data && data.user) {
+          if (form.id === 'resellerCreateUserForm') {
+            const connectionLimit = submitted && submitted.limit ? String(submitted.limit).trim() : '';
+            addOrReplaceRow(data.user, submitted);
+
+            const createCollapseEl = document.getElementById('formNewUserReseller');
+            if (createCollapseEl && createCollapseEl.classList.contains('show')) {
+              const collapseInstance = bootstrap.Collapse.getOrCreateInstance(createCollapseEl);
+              collapseInstance.hide();
+            }
+
+            form.reset();
+            if (typeof window.showCreatedUserNotice === 'function') {
+              window.showCreatedUserNotice({
+                title: 'Usuario creado',
+                username: data.user.username || (submitted && submitted.username) || '',
+                password: (submitted && submitted.password) || data.user.password || '',
+                expiryDate: data.user.expiry_date || '',
+                serverName: form.dataset.noticeServerName || '',
+                connectionLimit,
+              });
+            }
+          } else {
+            updateRowFromUser(data.user);
+          }
+        }
+
+        if (form.id === 'pwdModalForm' && data && data.user) {
+          const row = document.getElementById(`row-${data.user.id}`);
+          const pwdSpan = row ? row.querySelector('.pwd-hidden') : null;
+          if (pwdSpan && submitted && submitted.password) {
+            pwdSpan.dataset.pwd = String(submitted.password);
+            pwdSpan.textContent = '••••••';
+          }
+        }
+      },
+    });
+  }
+}
+
+bindDynamicRowActions();
+
+const resellerCreateUsernameInput = document.querySelector('#resellerCreateUserForm input[name="username"]');
+if (resellerCreateUsernameInput) {
+  const normalize = typeof window.normalizeVpnUsernameInput === 'function'
+    ? window.normalizeVpnUsernameInput
+    : (value) => String(value || '').toUpperCase();
+
+  const syncValue = () => {
+    const normalized = normalize(resellerCreateUsernameInput.value);
+    if (resellerCreateUsernameInput.value !== normalized) {
+      resellerCreateUsernameInput.value = normalized;
+    }
+  };
+
+  resellerCreateUsernameInput.addEventListener('input', syncValue);
+  resellerCreateUsernameInput.addEventListener('blur', syncValue);
+  syncValue();
+}
+
+if (typeof window.initUserOnlineChecker === 'function') {
+  window.initUserOnlineChecker({
+    endpoint: '{{ url_for("reseller.online_users") }}',
+    intervalMs: {{ online_check_interval_ms|int }},
+    badgeKey: 'username',
+  });
+}
+
+function updateRowFromUser(user) {
+  if (!user || !user.id) return;
+  const row = document.getElementById(`row-${user.id}`);
+  if (!row) return;
+
+  if (typeof window.applyUserStateToRow === 'function') {
+    window.applyUserStateToRow({
+      row,
+      user,
+      renderDaysCell: window.renderUserDaysCell,
+      getBlockAction: (targetUser) => window.buildUserBlockAction({
+        user: targetUser,
+        blockActionTemplate: resellerBlockActionTemplate,
+        unblockActionTemplate: resellerUnblockActionTemplate,
+      }),
+    });
+  }
+}
+</script>
+{% endblock %}

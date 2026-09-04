@@ -1,0 +1,724 @@
+{% extends "base.html" %}
+{% block title %}Usuarios VPN · Admin{% endblock %}
+
+{% block head %}
+{{ super() }}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4">
+  <div class="d-flex align-items-center justify-content-between w-100">
+    <h4 class="page-title mb-0"><i class="fas fa-user-group me-2 text-accent"></i>Usuarios VPN</h4>
+  </div>
+</div>
+
+<form method="get" action="{{ url_for('admin.users') }}" class="row g-2 mb-3">
+  <div class="col-12 col-md-4">
+    <input type="text" name="q" value="{{ filter_q or '' }}" class="form-control form-control-sm" placeholder="Buscar usuario...">
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="state" class="form-select form-select-sm">
+      <option value="" {{ 'selected' if not filter_state else '' }}>Todos</option>
+      <option value="active" {{ 'selected' if filter_state == 'active' else '' }}>Activos</option>
+      <option value="blocked" {{ 'selected' if filter_state == 'blocked' else '' }}>Bloqueados</option>
+      <option value="expired" {{ 'selected' if filter_state == 'expired' else '' }}>Expirados</option>
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="server_id" class="form-select form-select-sm">
+      <option value="">Todos los servidores</option>
+      {% for s in servers %}
+      <option value="{{ s.id }}" {{ 'selected' if filter_server_id == s.id else '' }}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="reseller_id" class="form-select form-select-sm">
+      <option value="">Todos los revendedores</option>
+      {% for r in resellers %}
+      <option value="{{ r.id }}" {{ 'selected' if filter_reseller_id == r.id else '' }}>{{ r.username }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2 d-flex gap-2">
+    <button type="submit" class="btn btn-sm btn-accent w-100">Buscar</button>
+    <a href="{{ url_for('admin.users') }}" class="btn btn-sm btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<!-- Crear usuario -->
+{% if servers %}
+<div class="vpn-card mb-4">
+  <div class="vpn-card-header" role="button" data-bs-toggle="collapse" data-bs-target="#formNewUser">
+    <i class="fas fa-circle-plus me-2 text-accent"></i>Crear Usuario VPN
+    <i class="fas fa-chevron-down ms-auto"></i>
+  </div>
+  <div class="collapse" id="formNewUser">
+    <div class="vpn-card-body">
+      <form method="post" id="adminCreateUserForm" action="{{ url_for('admin.create_user') }}" class="row g-3 js-ajax-user-action">
+        <div class="col-md-6">
+          <label class="form-label">Usuario</label>
+           <input type="text" class="form-control text-uppercase" name="username" required
+               pattern="^[A-Z]+-[A-Z]+(?:-[0-9]{2})?$" maxlength="30"
+             autocapitalize="characters"
+                 placeholder="NOMBRE-APELLIDO"
+               title="Usa formato NOMBRE-APELLIDO o NOMBRE-APELLIDO-00 en MAYUSCULAS">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Contraseña</label>
+          <div class="input-group">
+            <input type="password" class="form-control form-password-input" name="password" placeholder="••••••••" required minlength="6">
+            <button class="btn btn-outline-secondary btn-toggle-pwd-form"
+                    type="button" title="Mostrar/Ocultar" aria-label="Mostrar u ocultar contraseña">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Paquete</label>
+          <select class="form-select" name="package" required>
+            {% for code, pkg in package_options.items() %}
+            <option value="{{ code }}" {{ 'selected' if code == 'demo_1h' else '' }}>
+              {% if code == 'demo_1h' %}
+              Demo 1 hora (0 créditos)
+              {% else %}
+              {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
+              {% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Límite conexiones</label>
+          <input type="number" class="form-control" name="limit" required min="1" max="10" value="1">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Revendedor (opcional)</label>
+          <select class="form-select" name="reseller_id" id="resellerSelect">
+            <option value="">Admin</option>
+            {% for r in resellers %}
+            <option value="{{ r.id }}">{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Servidor</label>
+          <select class="form-select" name="server_id" required>
+            <option value="">Selecciona</option>
+            {% for s in servers %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12 text-end">
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-plus me-1"></i>Crear
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="vpn-card">
+  <div class="vpn-card-body p-0">
+    {% if users %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0 users-mobile-cards users-table-admin" id="usersTable">
+        <thead>
+          <tr>
+            <th>Usuario</th><th>Contraseña</th><th>Límite</th><th>Expira</th><th>Días disp.</th><th>Estado</th><th>En línea</th><th>Revendedor</th><th>Servidor</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr id="row-{{ u.id }}" data-user-state="{{ 'blocked' if u.is_blocked else 'active' }}">
+            <td class="fw-semibold text-light">
+              {{ u.username }}
+              {% if u.username.startswith('DEMO-') %}
+              <span class="badge bg-info text-dark ms-1">DEMO</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="pwd-hidden" data-pwd="{{ u.password }}">••••••</span>
+              <button class="btn btn-link btn-sm p-0 ms-1 text-muted btn-show-pwd" title="Mostrar">
+                <i class="fas fa-eye fa-xs"></i>
+              </button>
+            </td>
+            <td class="js-user-limit">{{ u.connection_limit }}</td>
+            <td class="js-user-expiry">{{ u.expiry_date.strftime('%d/%m/%Y') }}</td>
+            <td class="js-user-days">
+              {% if u.is_expired %}
+                <span class="text-danger fw-bold">Expirado</span>
+              {% elif u.days_remaining <= 3 %}
+                <span class="badge bg-warning text-dark">{{ u.days_remaining }} día(s)</span>
+              {% else %}
+                <span class="text-success">{{ u.days_remaining }} día(s)</span>
+              {% endif %}
+            </td>
+            <td class="user-state-cell" data-user="{{ u.username|upper }}">
+              {% if u.is_blocked %}
+              <span class="badge bg-warning text-dark user-state-badge">
+                Bloqueado
+              </span>
+              {% else %}
+              <span class="badge bg-success user-state-badge">
+                Activo
+              </span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="online-badge text-muted" data-user-id="{{ u.id }}" data-user="{{ u.username|upper }}">—</span>
+            </td>
+            <td class="js-user-reseller">{{ 'Admin' if u.reseller and u.reseller.note == '__SYSTEM_ADMIN_OWNER__' else (u.reseller.username if u.reseller else 'No disponible') }}</td>
+            <td class="js-user-server"><span class="badge bg-secondary">{{ u.server.name if u.server else 'No disponible' }}</span></td>
+            <td>
+              <div class="inline-actions">
+                <button type="button" class="btn btn-link text-muted btn-show-pwd d-md-none icon-btn"
+                        title="Mostrar contraseña">
+                  <i class="fas fa-eye"></i>
+                </button>
+                <button type="button" class="btn btn-info btn-open-pwd-modal icon-btn"
+                  data-bs-toggle="modal" data-bs-target="#pwdModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                        title="Cambiar contraseña">
+                  <i class="fas fa-key"></i>
+                </button>
+                <button type="button" class="btn btn-warning btn-open-limit-modal icon-btn"
+                  data-bs-toggle="modal" data-bs-target="#limitModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                  data-limit="{{ u.connection_limit }}"
+                        title="Cambiar límite">
+                  <i class="fas fa-sliders"></i>
+                </button>
+                {% if not u.username.startswith('DEMO-') %}
+                <button type="button" class="btn btn-success btn-open-renew-modal icon-btn"
+                  data-bs-toggle="modal" data-bs-target="#renewUserModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                  data-expiry="{{ u.expiry_date.strftime('%d/%m/%Y %H:%M') }}"
+                  data-is-expired="{{ 1 if u.is_expired else 0 }}"
+                  data-days-remaining="{{ u.days_remaining }}"
+                        title="Renovar usuario">
+                  <i class="fas fa-calendar-plus"></i>
+                </button>
+                {% endif %}
+                {% if u.is_blocked %}
+                    <form method="POST" action="{{ url_for('admin.unblock_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+                      data-confirm-scope="USUARIOS VPN"
+                      data-msg="¿Desbloquear el usuario '{{ u.username }}'?">
+                  <button type="submit" class="btn btn-success icon-btn" title="Desbloquear usuario">
+                    <i class="fas fa-lock-open"></i>
+                  </button>
+                </form>
+                {% else %}
+                    <form method="POST" action="{{ url_for('admin.block_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+                      data-confirm-scope="USUARIOS VPN"
+                      data-msg="¿Bloquear el usuario '{{ u.username }}'? Se cerrarán sus sesiones activas.">
+                  <button type="submit" class="btn btn-warning icon-btn" title="Bloquear usuario">
+                    <i class="fas fa-user-lock"></i>
+                  </button>
+                </form>
+                {% endif %}
+                    <form method="POST" action="{{ url_for('admin.checkuser_clear_user', user_id=u.id) }}" class="form-confirm js-ajax-user-action inline-action-form"
+                  data-confirm-scope="CHECKUSER"
+                  data-msg="¿Limpiar dispositivos CheckUser del usuario '{{ u.username }}'? Esto cerrará sus sesiones activas.">
+                  <button type="submit" class="btn btn-cyan icon-btn" title="Limpiar dispositivos CheckUser">
+                    <i class="fas fa-mobile-alt"></i>
+                  </button>
+                </form>
+                <button type="button" class="btn btn-secondary btn-open-move-modal icon-btn"
+                  data-bs-toggle="modal" data-bs-target="#moveUserModalGlobal"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username }}"
+                  data-current-server-id="{{ u.server_id }}"
+                  data-current-server-name="{{ u.server.name if u.server else 'No disponible' }}"
+                    title="Mover de servidor">
+                      <i class="fas fa-server"></i>
+                    </button>
+                <button type="button" class="btn btn-danger btn-delete-user icon-btn"
+                        data-user-id="{{ u.id }}" data-username="{{ u.username }}"
+                        title="Eliminar">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top border-card">
+      <small class="text-muted">Mostrando {{ users|length }} de {{ total }} usuario(s) activos.</small>
+      {% if pages > 1 %}
+      <nav aria-label="Paginación usuarios admin">
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item {{ 'disabled' if not has_prev else '' }}">
+            <a class="page-link" href="{{ url_for('admin.users', page=page-1, per_page=per_page, q=filter_q, state=filter_state, server_id=filter_server_id, reseller_id=filter_reseller_id) }}">Anterior</a>
+          </li>
+          <li class="page-item disabled"><span class="page-link">Página {{ page }} de {{ pages }}</span></li>
+          <li class="page-item {{ 'disabled' if not has_next else '' }}">
+            <a class="page-link" href="{{ url_for('admin.users', page=page+1, per_page=per_page, q=filter_q, state=filter_state, server_id=filter_server_id, reseller_id=filter_reseller_id) }}">Siguiente</a>
+          </li>
+        </ul>
+      </nav>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="text-center py-5 text-muted">
+      <i class="fas fa-user-group fa-3x mb-3 d-block opacity-25"></i>
+      <p>No hay usuarios VPN registrados.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="modal fade" id="pwdModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h6 class="modal-title"><i class="fas fa-key me-2 text-accent"></i><span id="pwdModalTitle">Contraseña</span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="pwdModalForm" class="js-ajax-user-action" action="{{ url_for('admin.change_password', user_id=999999) }}">
+        <div class="modal-body">
+          <label class="form-label-dark">Nueva contraseña</label>
+          <input type="text" name="password" class="form-control form-control-dark" placeholder="Nueva contraseña" required minlength="4" maxlength="50">
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent btn-sm">Cambiar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="limitModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h6 class="modal-title"><i class="fas fa-sliders me-2 text-accent"></i><span id="limitModalTitle">Límite</span></h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="limitModalForm" class="js-ajax-user-action" action="{{ url_for('admin.change_limit', user_id=999999) }}">
+        <div class="modal-body">
+          <label class="form-label-dark">Conexiones simultáneas</label>
+          <input type="number" name="limit" id="limitModalInput" class="form-control form-control-dark" value="1" required min="1">
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent btn-sm">Cambiar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="renewUserModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title"><i class="fas fa-redo me-2 text-accent"></i><span id="renewModalTitle">Renovar Usuario</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="renewModalForm" class="js-ajax-user-action" action="{{ url_for('admin.renew_user', user_id=999999) }}">
+        <div class="modal-body">
+          <p class="text-muted mb-3" id="renewModalInfo"></p>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label-dark">Paquete de renovación</label>
+              <select class="form-select" name="package" required>
+                {% for code, pkg in package_options.items() %}
+                {% if code != 'demo_1h' %}
+                <option value="{{ code }}" {{ 'selected' if code == '1m' else '' }}>
+                  {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
+                </option>
+                {% endif %}
+                {% endfor %}
+              </select>
+              <small class="text-muted d-block mt-2">
+                Se sumará el tiempo al vencimiento actual. Si ya expiró, comenzará desde hoy.
+              </small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-check me-2"></i>Renovar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="moveUserModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title"><i class="fas fa-right-left me-2 text-accent"></i><span id="moveModalTitle">Mover Usuario</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="moveModalForm" class="form-confirm js-ajax-user-action" action="{{ url_for('admin.move_user_server', user_id=999999) }}"
+            data-confirm-scope="USUARIOS VPN"
+            data-msg="¿Mover este usuario al servidor seleccionado?">
+        <div class="modal-body">
+          <p class="text-muted mb-3" id="moveModalInfo"></p>
+          <label class="form-label-dark">Servidor destino</label>
+          <select class="form-select" name="target_server_id" id="moveTargetServerSelect" required>
+            <option value="">Selecciona servidor</option>
+            {% for s in servers %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+          <small class="text-muted d-block mt-2">
+            Se copiará el usuario al servidor destino y luego se intentará eliminar del servidor origen.
+          </small>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-check me-2"></i>Mover usuario
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script>
+  let dataTableInstance;
+  
+  $(document).ready(function () {
+    if ($('#usersTable').length) {
+      dataTableInstance = $('#usersTable').DataTable({
+        language: { url: '//cdn.datatables.net/plug-ins/1.13.8/i18n/es-ES.json' },
+        order: [[0, 'asc']], 
+        paging: false,
+        info: false,
+        searching: false,
+        columnDefs: [{ orderable: false, targets: [9] }]
+      });
+    }
+  });
+
+  const pwdActionTemplate = `{{ url_for('admin.change_password', user_id=999999) }}`;
+  const limitActionTemplate = `{{ url_for('admin.change_limit', user_id=999999) }}`;
+  const renewActionTemplate = `{{ url_for('admin.renew_user', user_id=999999) }}`;
+  const moveActionTemplate = `{{ url_for('admin.move_user_server', user_id=999999) }}`;
+  const adminBlockActionTemplate = `{{ url_for('admin.block_user', user_id=999999) }}`;
+  const adminUnblockActionTemplate = `{{ url_for('admin.unblock_user', user_id=999999) }}`;
+  const adminCheckuserClearTemplate = `{{ url_for('admin.checkuser_clear_user', user_id=999999) }}`;
+
+  function updateRowFromUser(user) {
+    if (!user || !user.id) return;
+    const row = document.getElementById(`row-${user.id}`);
+    if (!row) return;
+
+    if (typeof window.applyUserStateToRow === 'function') {
+      window.applyUserStateToRow({
+        row,
+        user,
+        renderDaysCell: window.renderUserDaysCell,
+        getBlockAction: (targetUser) => window.buildUserBlockAction({
+          user: targetUser,
+          blockActionTemplate: adminBlockActionTemplate,
+          unblockActionTemplate: adminUnblockActionTemplate,
+        }),
+      });
+    }
+  }
+
+  function renderUserRowHtml(user) {
+    const isDemo = String(user.username || '').startsWith('DEMO-');
+    const usernameBadge = isDemo ? '<span class="badge bg-info text-dark ms-1">DEMO</span>' : '';
+    const blockAction = window.buildUserBlockAction({
+      user,
+      blockActionTemplate: adminBlockActionTemplate,
+      unblockActionTemplate: adminUnblockActionTemplate,
+    });
+
+    return `
+      <td class="fw-semibold text-light">
+        ${user.username}
+        ${usernameBadge}
+      </td>
+      <td>
+        <span class="pwd-hidden" data-pwd="${user.password || ''}">••••••</span>
+        <button class="btn btn-link btn-sm p-0 ms-1 text-muted btn-show-pwd" title="Mostrar">
+          <i class="fas fa-eye fa-xs"></i>
+        </button>
+      </td>
+      <td class="js-user-limit">${user.connection_limit || 1}</td>
+      <td class="js-user-expiry">${user.expiry_date || ''}</td>
+      <td class="js-user-days">${window.renderUserDaysCell(user)}</td>
+      <td class="user-state-cell" data-user="${(user.username || '').toUpperCase()}">
+        <span class="badge ${user.is_blocked ? 'bg-warning text-dark' : 'bg-success'} user-state-badge">
+          ${user.is_blocked ? 'Bloqueado' : 'Activo'}
+        </span>
+      </td>
+      <td>
+        <span class="online-badge text-muted" data-user-id="${user.id}" data-user="${(user.username || '').toUpperCase()}">—</span>
+      </td>
+      <td class="js-user-reseller">${user.reseller_label || 'No disponible'}</td>
+      <td class="js-user-server"><span class="badge bg-secondary">${user.server_name || 'No disponible'}</span></td>
+      <td>
+        <div class="inline-actions">
+          <button type="button" class="btn btn-link text-muted btn-show-pwd d-md-none icon-btn"
+            title="Mostrar contraseña">
+            <i class="fas fa-eye"></i>
+          </button>
+          <button type="button" class="btn btn-info btn-open-pwd-modal icon-btn"
+            data-bs-toggle="modal" data-bs-target="#pwdModalGlobal"
+            data-user-id="${user.id}"
+            data-username="${user.username}"
+            title="Cambiar contraseña">
+            <i class="fas fa-key"></i>
+          </button>
+          <button type="button" class="btn btn-warning btn-open-limit-modal icon-btn"
+            data-bs-toggle="modal" data-bs-target="#limitModalGlobal"
+            data-user-id="${user.id}"
+            data-username="${user.username}"
+            data-limit="${user.connection_limit || 1}"
+            title="Cambiar límite">
+            <i class="fas fa-sliders"></i>
+          </button>
+          <button type="button" class="btn btn-success btn-open-renew-modal icon-btn"
+            data-bs-toggle="modal" data-bs-target="#renewUserModalGlobal"
+            data-user-id="${user.id}"
+            data-username="${user.username}"
+            data-expiry="${user.expiry_datetime || ''}"
+            data-is-expired="${user.is_expired ? '1' : '0'}"
+            data-days-remaining="${user.days_remaining || 0}"
+            title="Renovar usuario">
+            <i class="fas fa-calendar-plus"></i>
+          </button>
+          <form method="POST" action="${blockAction.action}" class="form-confirm js-ajax-user-action js-block-toggle-form inline-action-form"
+            data-confirm-scope="USUARIOS VPN"
+            data-msg="${blockAction.msg}">
+            <button type="submit" class="${blockAction.btnClass} icon-btn" title="${blockAction.title}">
+              <i class="${blockAction.icon}"></i>
+            </button>
+          </form>
+          <form method="POST" action="${adminCheckuserClearTemplate.replace('999999', user.id)}" class="form-confirm js-ajax-user-action inline-action-form"
+            data-confirm-scope="CHECKUSER"
+            data-msg="¿Limpiar dispositivos CheckUser del usuario '${user.username}'? Esto cerrará sus sesiones activas.">
+            <button type="submit" class="btn btn-cyan icon-btn" title="Limpiar dispositivos CheckUser">
+              <i class="fas fa-mobile-alt"></i>
+            </button>
+          </form>
+          <button type="button" class="btn btn-secondary btn-open-move-modal icon-btn"
+            data-bs-toggle="modal" data-bs-target="#moveUserModalGlobal"
+            data-user-id="${user.id}"
+            data-username="${user.username}"
+            data-current-server-id="${user.server_id || ''}"
+            data-current-server-name="${user.server_name || 'No disponible'}"
+            title="Mover de servidor">
+            <i class="fas fa-server"></i>
+          </button>
+          <button type="button" class="btn btn-danger btn-delete-user icon-btn"
+            data-user-id="${user.id}" data-username="${user.username}"
+            title="Eliminar">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </td>
+    `;
+  }
+
+  function addOrReplaceRow(user, submitted) {
+    if (!user || !user.id) return;
+    let row = document.getElementById(`row-${user.id}`);
+    if (!row) {
+      row = document.createElement('tr');
+      row.id = `row-${user.id}`;
+      row.dataset.userState = user.is_blocked ? 'blocked' : 'active';
+      row.innerHTML = renderUserRowHtml({ ...user, password: (submitted && submitted.password) || user.password || '' });
+
+      if (dataTableInstance) {
+        dataTableInstance.row.add(row).draw(false);
+      } else {
+        const tbody = document.querySelector('#usersTable tbody');
+        if (tbody) tbody.prepend(row);
+      }
+    } else {
+      updateRowFromUser(user);
+      const pwdSpan = row.querySelector('.pwd-hidden');
+      if (pwdSpan && user.password) {
+        pwdSpan.dataset.pwd = String(user.password);
+        pwdSpan.textContent = '••••••';
+      }
+    }
+
+    bindDynamicRowActions();
+  }
+
+  function bindMoveModalButtons() {
+    document.querySelectorAll('.btn-open-move-modal').forEach(btn => {
+      if (btn.dataset.moveModalBound === '1') return;
+      btn.dataset.moveModalBound = '1';
+      btn.addEventListener('click', () => {
+      const userId = btn.dataset.userId || '';
+      const username = btn.dataset.username || '';
+      const currentServerId = btn.dataset.currentServerId || '';
+      const currentServerName = btn.dataset.currentServerName || 'No disponible';
+
+      const form = document.getElementById('moveModalForm');
+      const info = document.getElementById('moveModalInfo');
+      const title = document.getElementById('moveModalTitle');
+      const select = document.getElementById('moveTargetServerSelect');
+
+      if (!form || !info || !title || !select) return;
+
+      form.action = moveActionTemplate.replace('999999', userId);
+      title.textContent = `Mover ${username}`;
+      info.innerHTML = `<strong>Usuario:</strong> ${username}<br><strong>Servidor actual:</strong> ${currentServerName}`;
+
+      Array.from(select.options).forEach(opt => {
+        if (!opt.value) {
+          opt.disabled = false;
+          return;
+        }
+        opt.disabled = (opt.value === currentServerId);
+      });
+
+      const firstAvailable = Array.from(select.options).find(opt => opt.value && !opt.disabled);
+      select.value = firstAvailable ? firstAvailable.value : '';
+    });
+    });
+  }
+
+  function bindDynamicRowActions() {
+    if (typeof window.initFormPasswordToggle === 'function') {
+      window.initFormPasswordToggle();
+    }
+    if (typeof window.initPasswordToggleBindings === 'function') {
+      window.initPasswordToggleBindings({ buttonSelector: '.btn-show-pwd' });
+    }
+    if (typeof window.initUserModalBindings === 'function') {
+      window.initUserModalBindings({
+        pwdActionTemplate,
+        limitActionTemplate,
+        renewActionTemplate,
+        renewInfoBuilder: window.buildUserRenewInfo,
+      });
+    }
+    if (typeof window.initAjaxUserDeletion === 'function') {
+      window.initAjaxUserDeletion({
+        getDeleteUrl: (btn) => {
+          const userId = btn.dataset.userId || '';
+          return `{{ url_for('admin.delete_user', user_id=999) }}`.replace('999', userId);
+        },
+        getUsername: (btn) => btn.dataset.username || '',
+        removeRow: (btn) => window.removeUserRow(btn, dataTableInstance),
+      });
+    }
+    if (typeof window.initAjaxUserActionForms === 'function') {
+      window.initAjaxUserActionForms({
+        selector: '.js-ajax-user-action',
+        onSuccess: ({ form, data, submitted }) => {
+          if (data && data.user) {
+            if (form.id === 'adminCreateUserForm') {
+              const serverSelect = form.querySelector('select[name="server_id"]');
+              const serverName = serverSelect && serverSelect.selectedOptions[0]
+                ? serverSelect.selectedOptions[0].textContent.trim()
+                : '';
+              const connectionLimit = submitted && submitted.limit ? String(submitted.limit).trim() : '';
+              addOrReplaceRow(data.user, submitted);
+
+              const createCollapseEl = document.getElementById('formNewUser');
+              if (createCollapseEl && createCollapseEl.classList.contains('show')) {
+                const collapseInstance = bootstrap.Collapse.getOrCreateInstance(createCollapseEl);
+                collapseInstance.hide();
+              }
+
+              form.reset();
+              if (typeof window.showCreatedUserNotice === 'function') {
+                window.showCreatedUserNotice({
+                  title: 'Usuario creado',
+                  username: data.user.username || (submitted && submitted.username) || '',
+                  password: (submitted && submitted.password) || data.user.password || '',
+                  expiryDate: data.user.expiry_date || '',
+                  serverName,
+                  connectionLimit,
+                });
+              }
+            } else {
+              updateRowFromUser(data.user);
+            }
+          }
+
+          if (form.id === 'moveModalForm' && data && data.user) {
+            const row = document.getElementById(`row-${data.user.id}`);
+            const serverCell = row ? row.querySelector('.js-user-server') : null;
+            if (serverCell) {
+              serverCell.innerHTML = `<span class="badge bg-secondary">${data.user.server_name || 'No disponible'}</span>`;
+            }
+            const resellerCell = row ? row.querySelector('.js-user-reseller') : null;
+            if (resellerCell) {
+              resellerCell.textContent = data.user.reseller_label || 'No disponible';
+            }
+            const moveBtn = row ? row.querySelector('.btn-open-move-modal') : null;
+            if (moveBtn) {
+              moveBtn.dataset.currentServerId = String(data.user.server_id || '');
+              moveBtn.dataset.currentServerName = data.user.server_name || 'No disponible';
+            }
+          }
+
+          if (form.id === 'pwdModalForm' && data && data.user) {
+            const row = document.getElementById(`row-${data.user.id}`);
+            const pwdSpan = row ? row.querySelector('.pwd-hidden') : null;
+            if (pwdSpan && submitted && submitted.password) {
+              pwdSpan.dataset.pwd = String(submitted.password);
+              pwdSpan.textContent = '••••••';
+            }
+          }
+        },
+      });
+    }
+    bindMoveModalButtons();
+  }
+
+  bindDynamicRowActions();
+
+  const adminCreateUsernameInput = document.querySelector('#adminCreateUserForm input[name="username"]');
+  if (adminCreateUsernameInput) {
+    const normalize = typeof window.normalizeVpnUsernameInput === 'function'
+      ? window.normalizeVpnUsernameInput
+      : (value) => String(value || '').toUpperCase();
+
+    const syncValue = () => {
+      const normalized = normalize(adminCreateUsernameInput.value);
+      if (adminCreateUsernameInput.value !== normalized) {
+        adminCreateUsernameInput.value = normalized;
+      }
+    };
+
+    adminCreateUsernameInput.addEventListener('input', syncValue);
+    adminCreateUsernameInput.addEventListener('blur', syncValue);
+    syncValue();
+  }
+
+  if (typeof window.initUserOnlineChecker === 'function') {
+    window.initUserOnlineChecker({
+      endpoint: '{{ url_for("admin.online_users") }}',
+      intervalMs: {{ online_check_interval_ms|int }},
+      badgeKey: 'userId',
+    });
+  }
+
+
+</script>
+{% endblock %}

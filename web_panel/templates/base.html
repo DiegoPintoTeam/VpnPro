@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}VPNPro Panel{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v='20260421b') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<script>
+  (function () {
+    const THEME_KEY = 'vpnpro-theme';
+    const RANDOM_DAILY = 'random_daily';
+    const THEMES = ['enterprise', 'carbon', 'oceanic', 'crimson', 'forest', 'midnight', 'solar', 'mono', 'neon', 'arctic'];
+
+    function dailyTheme() {
+      const now = new Date();
+      const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+      let hash = 0;
+      for (let i = 0; i < dayKey.length; i += 1) {
+        hash = (hash * 31 + dayKey.charCodeAt(i)) >>> 0;
+      }
+      return THEMES[hash % THEMES.length];
+    }
+
+    let savedTheme = 'enterprise';
+    try {
+      savedTheme = localStorage.getItem(THEME_KEY) || 'enterprise';
+    } catch {
+      savedTheme = 'enterprise';
+    }
+
+    let chosen = savedTheme === RANDOM_DAILY ? dailyTheme() : savedTheme;
+    if (!THEMES.includes(chosen)) {
+      chosen = 'enterprise';
+    }
+
+    document.body.classList.add('theme-preload');
+    document.body.classList.add(`theme-${chosen}`);
+  })();
+</script>
+
+<!-- ── Sidebar ─────────────────────────────────────────── -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <!-- Shield-halved logo -->
+    <svg class="me-2 flex-shrink-0" viewBox="-2 -5 104 113" width="28" height="28" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <clipPath id="shLeftB"><rect x="-5" y="-10" width="57" height="125"/></clipPath>
+        <clipPath id="shRightB"><rect x="49" y="-10" width="63" height="125"/></clipPath>
+      </defs>
+      <path id="shPathB" d="M8,18 C8,-2 92,-2 92,18 L84,73 C72,97 50,100 50,100 C28,97 16,73 16,73 Z"/>
+      <use href="#shPathB" clip-path="url(#shLeftB)" fill="#0f766e"/>
+      <use href="#shPathB" clip-path="url(#shRightB)" fill="#070c12"/>
+      <use href="#shPathB" fill="none" stroke="#0f766e" stroke-width="3"/>
+      <line x1="50" y1="14" x2="50" y2="82" stroke="#0f766e" stroke-width="2.2"/>
+    </svg>
+    <span class="fw-bold">VPN <span class="text-accent">Pro</span></span>
+  </div>
+
+  <nav class="sidebar-nav mt-3">
+    {% if current_user.role == 'admin' %}
+      <a href="{{ url_for('admin.dashboard') }}"
+         class="nav-link {% if request.endpoint == 'admin.dashboard' %}active{% endif %}">
+        <i class="fas fa-gauge-high"></i> Dashboard
+      </a>
+      <a href="{{ url_for('admin.servers') }}"
+         class="nav-link {% if request.endpoint == 'admin.servers' %}active{% endif %}">
+        <i class="fas fa-server"></i> Servidores
+      </a>
+      <a href="{{ url_for('admin.resellers') }}"
+         class="nav-link {% if request.endpoint == 'admin.resellers' %}active{% endif %}">
+        <i class="fas fa-users-gear"></i> Revendedores
+      </a>
+      <a href="{{ url_for('admin.users') }}"
+         class="nav-link {% if request.endpoint == 'admin.users' %}active{% endif %}">
+        <i class="fas fa-user-group"></i> Usuarios VPN
+      </a>
+    {% else %}
+      <a href="{{ url_for('reseller.dashboard') }}"
+         class="nav-link {% if request.endpoint == 'reseller.dashboard' %}active{% endif %}">
+        <i class="fas fa-gauge-high"></i> Dashboard
+      </a>
+      <a href="{{ url_for('reseller.users') }}"
+         class="nav-link {% if request.endpoint == 'reseller.users' %}active{% endif %}">
+        <i class="fas fa-user-group"></i> Mis Usuarios
+      </a>
+    {% endif %}
+  </nav>
+
+  <div class="sidebar-footer text-center">
+    <div class="sidebar-footer-block fw-semibold">
+      <span class="footer-line d-block">VPN Pro &copy; 2026 · Panel Web</span>
+      <span class="footer-line d-block">Diego Pinto</span>
+      <span class="footer-line d-block">(Team)</span>
+      <a href="https://www.diegopintoteam.com" target="_blank" rel="noopener noreferrer" class="footer-line footer-link d-block">www.diegopintoteam.com</a>
+    </div>
+  </div>
+</aside>
+
+<!-- Overlay para cerrar sidebar en móvil -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<!-- ── Main wrapper ─────────────────────────────────────── -->
+<div class="main-wrapper" id="mainWrapper">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <button class="btn btn-link text-white px-2" id="sidebarToggle" title="Menú" aria-label="Abrir o cerrar menú" aria-expanded="true">
+      <i class="fas fa-bars fa-lg"></i>
+    </button>
+
+    <div class="ms-auto d-flex align-items-center gap-2 gap-md-3">
+      <div class="d-flex align-items-center gap-2">
+        <label for="themeSelect" class="small text-white mb-0 d-flex align-items-center gap-2" style="font-weight:600;">
+          <i class="fas fa-palette fa-lg text-accent" aria-hidden="true" style="font-size:1.3rem;"></i>
+          <span class="d-none d-sm-inline">Tema</span>
+        </label>
+        <select id="themeSelect" class="form-select form-select-sm theme-select" aria-label="Selector de tema">
+          <option value="random_daily">Aleatorio diario</option>
+          <option value="enterprise">Enterprise</option>
+          <option value="carbon">Carbon</option>
+          <option value="oceanic">Oceanic</option>
+          <option value="crimson">Crimson</option>
+          <option value="forest">Forest</option>
+          <option value="midnight">Midnight</option>
+          <option value="solar">Solar</option>
+          <option value="mono">Mono</option>
+          <option value="neon">Neon</option>
+          <option value="arctic">Arctic</option>
+        </select>
+      </div>
+
+      {% if current_user.role == 'admin' %}
+      <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#adminAccountModal" title="Cuenta de administrador">
+        <i class="fas fa-crown"></i><span class="d-none d-sm-inline ms-1">Cuenta de administrador</span>
+      </button>
+      {% endif %}
+
+      {% if current_user.role == 'reseller' %}
+      <button class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#resellerAccountModal" title="Mi cuenta">
+        <i class="fas fa-user-pen"></i><span class="d-none d-sm-inline ms-1">Mi cuenta</span>
+      </button>
+      {% endif %}
+
+      <span class="badge badge-role">
+        <i class="fas {% if current_user.role == 'admin' %}fa-crown{% else %}fa-user-tie{% endif %} me-1"></i>
+        {{ current_user.username }}
+      </span>
+      <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-danger" title="Salir">
+        <i class="fas fa-right-from-bracket"></i><span class="d-none d-sm-inline ms-1">Salir</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- Content area -->
+  <main class="content-area">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        {% if category == 'demo_limit' %}
+        <script>
+          window.__panelNotices = window.__panelNotices || [];
+          window.__panelNotices.push({
+            title: '¿Confirmar?',
+            scope: 'USUARIOS VPN',
+            message: {{ message|tojson }},
+            category: 'warning',
+            useConfirmStyle: true,
+            confirmText: 'Sí, continuar',
+            cancelText: 'Cancelar',
+          });
+        </script>
+        {% else %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show mb-3" role="alert">
+          <i class="fas {% if category == 'success' %}fa-circle-check{% elif category == 'danger' %}fa-circle-xmark{% elif category == 'warning' %}fa-triangle-exclamation{% else %}fa-circle-info{% endif %} me-2"></i>
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        {% endif %}
+      {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="{{ url_for('static', filename='js/main.js', v='20260417e') }}"></script>
+{% block scripts %}{% endblock %}
+
+{% if current_user.is_authenticated and current_user.role == 'admin' %}
+<div class="modal fade" id="adminAccountModal" tabindex="-1" aria-labelledby="adminAccountModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title" id="adminAccountModalLabel">
+          <i class="fas fa-user-shield me-2 text-accent"></i>Cuenta de administrador
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post" action="{{ url_for('admin.update_account') }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Nueva contraseña (opcional)</label>
+            <input type="password" class="form-control" name="new_password" minlength="6" placeholder="Mínimo 6 caracteres">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Confirmar nueva contraseña</label>
+            <input type="password" class="form-control" name="confirm_password" minlength="6">
+          </div>
+
+          <div class="mb-0">
+            <label class="form-label">Contraseña actual (requerida)</label>
+            <input type="password" class="form-control" name="current_password" required>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-accent" type="submit">
+            <i class="fas fa-floppy-disk me-1"></i>Guardar credenciales
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if current_user.is_authenticated and current_user.role == 'reseller' %}
+<div class="modal fade" id="resellerAccountModal" tabindex="-1" aria-labelledby="resellerAccountModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title" id="resellerAccountModalLabel">
+          <i class="fas fa-user-pen me-2 text-accent"></i>Mi cuenta de revendedor
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <form method="post" action="{{ url_for('reseller.update_account') }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Nueva contraseña</label>
+            <input type="password" class="form-control" name="new_password" minlength="6" placeholder="Mínimo 6 caracteres">
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Confirmar nueva contraseña</label>
+            <input type="password" class="form-control" name="confirm_password" minlength="6">
+          </div>
+
+          <div class="mb-0">
+            <label class="form-label">Contraseña actual (requerida)</label>
+            <input type="password" class="form-control" name="current_password" required>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-accent" type="submit">
+            <i class="fas fa-floppy-disk me-1"></i>Guardar credenciales
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+</body>
+</html>

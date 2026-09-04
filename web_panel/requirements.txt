@@ -1,0 +1,9 @@
+flask>=3.0.0
+flask-sqlalchemy>=3.1.1
+flask-login>=0.6.3
+flask-wtf>=1.2.1
+flask-limiter>=3.5.0
+flask-compress>=1.15
+paramiko>=3.4.0
+cryptography>=42.0.0
+gunicorn>=21.2.0

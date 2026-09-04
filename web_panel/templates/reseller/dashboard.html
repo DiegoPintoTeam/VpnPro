@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ reseller.username }}{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4">
+  <div>
+    <h4 class="page-title">
+      <i class="fas fa-gauge-high me-2 text-accent"></i>Mi Dashboard
+    </h4>
+    <span class="text-muted small">
+      Servidor: <strong>{{ server.name if server else 'Sin asignar' }}</strong>
+      ({{ server.ip if server else 'No disponible' }})
+
+    </span>
+  </div>
+  <a href="{{ url_for('reseller.users') }}" class="btn btn-accent">
+    <i class="fas fa-users me-2"></i>Gestionar Usuarios
+  </a>
+</div>
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="stat-card border-accent-blue">
+      <div class="stat-icon bg-accent-blue"><i class="fas fa-link"></i></div>
+      <div class="stat-body">
+        <div class="stat-value" id="resellerMaxConnections">{{ reseller.max_connections }}</div>
+        <div class="stat-label">Conexiones límite</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card border-accent-orange">
+      <div class="stat-icon bg-accent-orange"><i class="fas fa-user-group"></i></div>
+      <div class="stat-body">
+        <div class="stat-value" id="resellerTotalUsers">{{ total_count }}</div>
+        <div class="stat-label">Usuarios VPN</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card border-accent-green">
+      <div class="stat-icon bg-accent-green"><i class="fas fa-signal"></i></div>
+      <div class="stat-body">
+        <div class="stat-value" id="resellerOnlineCount">0</div>
+        <div class="stat-label">En línea ahora</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card border-accent-purple">
+      <div class="stat-icon bg-accent-purple"><i class="fas fa-money-bill-wave"></i></div>
+      <div class="stat-body">
+        <div class="stat-value" id="resellerPanelCredits">{{ reseller.panel_credits or 0 }}</div>
+        <div class="stat-label">Créditos</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mt-1">
+  <div class="col-lg-12">
+    <div class="vpn-card">
+      <div class="vpn-card-header">
+        <i class="fas fa-receipt me-2 text-accent"></i>Historial de créditos
+      </div>
+      <div class="vpn-card-body p-0">
+        {% if credit_logs %}
+        <div class="table-responsive">
+          <table class="table table-dark table-hover mb-0 small credits-mobile-cards" id="creditsTable">
+            <thead>
+              <tr>
+                <th>Fecha</th><th>Movimiento</th><th>Saldo</th><th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in credit_logs %}
+              <tr data-credit-state="{{ 'positive' if c.delta > 0 else 'negative' }}">
+                <td>{{ c.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+                <td>
+                  <span class="badge {{ 'bg-success' if c.delta > 0 else 'bg-warning text-dark' }}">
+                    {{ '+' if c.delta > 0 else '' }}{{ c.delta }}
+                  </span>
+                </td>
+                <td><span class="badge bg-info text-dark">{{ c.balance_after }}</span></td>
+                <td>{{ c.reason }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">Sin movimientos de créditos todavía.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(() => {
+  const endpoint = '{{ url_for("reseller.online_users") }}?enforce=0';
+  const summaryEndpoint = '{{ url_for("reseller.dashboard_summary") }}';
+  const countEl = document.getElementById('resellerOnlineCount');
+  const totalUsersEl = document.getElementById('resellerTotalUsers');
+  const creditsEl = document.getElementById('resellerPanelCredits');
+  const maxConnectionsEl = document.getElementById('resellerMaxConnections');
+  const refreshEveryMs = 60000;
+  const fetchTimeoutMs = 15000;
+  let summaryRequestInFlight = false;
+  let onlineRequestInFlight = false;
+
+  if (!countEl) {
+    return;
+  }
+
+  const fetchJsonWithTimeout = async (url, timeoutMs) => {
+    const options = { cache: 'no-store' };
+    let controller = null;
+    let timeoutId = null;
+
+    if (typeof AbortController !== 'undefined') {
+      controller = new AbortController();
+      options.signal = controller.signal;
+      timeoutId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {
+          // Ignorar errores de abort; el flujo maneja timeout/fallo.
+        }
+      }, Math.max(1000, Number(timeoutMs) || 10000));
+    }
+
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return await res.json();
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
+
+  const fetchSummary = async () => {
+    if (document.visibilityState === 'hidden') {
+      return;
+    }
+
+    if (summaryRequestInFlight) {
+      return;
+    }
+
+    summaryRequestInFlight = true;
+
+    try {
+      const data = await fetchJsonWithTimeout(summaryEndpoint, fetchTimeoutMs);
+      if (!data || !data.ok) {
+        return;
+      }
+      if (totalUsersEl) totalUsersEl.textContent = String(data.total_users || 0);
+      if (creditsEl) creditsEl.textContent = String(data.panel_credits || 0);
+      if (maxConnectionsEl) maxConnectionsEl.textContent = String(data.max_connections || 0);
+    } catch {
+      // Mantener valores existentes si falla el refresco.
+    } finally {
+      summaryRequestInFlight = false;
+    }
+  };
+
+  const fetchOnlineUsers = async () => {
+    if (document.visibilityState === 'hidden') {
+      return;
+    }
+
+    if (onlineRequestInFlight) {
+      return;
+    }
+
+    onlineRequestInFlight = true;
+
+    countEl.textContent = '...';
+    try {
+      const data = await fetchJsonWithTimeout(endpoint, fetchTimeoutMs);
+      if (!data || !data.ok) {
+        countEl.textContent = '0';
+        return;
+      }
+
+      const online = data.online || {};
+      const onlineUsers = Object.values(online).filter((info) => Number((info && info.sessions) || 0) > 0);
+      countEl.textContent = String(onlineUsers.length);
+    } catch {
+      countEl.textContent = '0';
+    } finally {
+      onlineRequestInFlight = false;
+    }
+  };
+
+  fetchSummary();
+  fetchOnlineUsers();
+  setInterval(fetchSummary, refreshEveryMs);
+  setInterval(fetchOnlineUsers, refreshEveryMs);
+})();
+</script>
+{% endblock %}

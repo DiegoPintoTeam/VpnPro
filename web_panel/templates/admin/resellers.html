@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}Revendedores · Admin{% endblock %}
+
+{% block head %}
+{{ super() }}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-header mb-4">
+  <div>
+    <h4 class="page-title"><i class="fas fa-users-gear me-2 text-accent"></i>Revendedores</h4>
+    <span class="text-muted small">Gestiona las cuentas de tus revendedores</span>
+  </div>
+  <button class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#addResellerModal">
+    <i class="fas fa-user-plus me-2"></i>Nuevo revendedor
+  </button>
+</div>
+
+<form method="get" action="{{ url_for('admin.resellers') }}" class="row g-2 mb-3">
+  <div class="col-12 col-md-5">
+    <input type="text" name="q" value="{{ filter_q or '' }}" class="form-control form-control-sm" placeholder="Buscar usuario o correo...">
+  </div>
+  <div class="col-6 col-md-3">
+    <select name="server_id" class="form-select form-select-sm">
+      <option value="">Todos los servidores</option>
+      {% for s in servers %}
+      <option value="{{ s.id }}" {{ 'selected' if filter_server_id == s.id else '' }}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-6 col-md-2">
+    <select name="state" class="form-select form-select-sm">
+      <option value="" {{ 'selected' if not filter_state else '' }}>Todos</option>
+      <option value="active" {{ 'selected' if filter_state == 'active' else '' }}>Activos</option>
+      <option value="inactive" {{ 'selected' if filter_state == 'inactive' else '' }}>Inactivos</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-2 d-flex gap-2">
+    <button type="submit" class="btn btn-sm btn-accent w-100">Buscar</button>
+    <a href="{{ url_for('admin.resellers') }}" class="btn btn-sm btn-outline-secondary">Limpiar</a>
+  </div>
+</form>
+
+<div class="vpn-card">
+  <div class="vpn-card-body p-0">
+    {% if resellers %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0" id="resellersTable">
+        <thead>
+          <tr>
+            <th>Usuario</th><th>Servidor</th><th>Límite</th>
+            <th>Créditos</th><th>Estado</th><th>Nota</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in resellers %}
+          <tr>
+            <td>
+              <span class="fw-semibold text-light">{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}</span>
+              {% if r.email %}<br><small class="text-muted">{{ r.email }}</small>{% endif %}
+            </td>
+            <td><span class="badge bg-secondary">{{ r.server.name if r.server else 'No disponible' }}</span></td>
+            <td>
+              <span class="badge bg-info text-dark">{{ r.max_connections }}</span>
+            </td>
+            <td><span class="badge bg-info text-dark">{{ r.panel_credits or 0 }}</span></td>
+            <td>
+              <span class="badge {{ 'bg-success' if r.is_active else 'bg-danger' }}">
+                {{ 'Activo' if r.is_active else 'Inactivo' }}
+              </span>
+            </td>
+            <td><small class="text-muted">{{ r.note or '—' }}</small></td>
+            <td>
+              <div class="inline-actions">
+                <button type="button" class="btn btn-success btn-open-credits-modal icon-btn" title="Agregar créditos"
+                  data-bs-toggle="modal" data-bs-target="#addCreditsModalGlobal"
+                  data-reseller-id="{{ r.id }}"
+                  data-reseller-name="{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}"
+                  data-reseller-credits="{{ r.panel_credits or 0 }}">
+                  <i class="fas fa-money-bill-wave"></i>
+                </button>
+                <button class="btn btn-primary btn-open-edit-modal icon-btn" title="Editar"
+                  data-bs-toggle="modal" data-bs-target="#editResellerModalGlobal"
+                  data-reseller-id="{{ r.id }}"
+                  data-reseller-name="{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}"
+                  data-email="{{ r.email or '' }}"
+                  data-server-id="{{ r.server_id or '' }}"
+                  data-max-connections="{{ r.max_connections }}"
+                  data-panel-credits="{{ r.panel_credits or 0 }}"
+                  data-note="{{ r.note or '' }}">
+                  <i class="fas fa-pen"></i>
+                </button>
+                    <form method="POST" action="{{ url_for('admin.toggle_reseller', reseller_id=r.id) }}"
+                      class="form-confirm inline-action-form"
+                      data-confirm-scope="REVENDEDORES"
+                      data-msg="{% if r.is_active %}¿Desactivar el revendedor '{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}'?{% else %}¿Activar el revendedor '{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}'?{% endif %}">
+                  <button type="submit" class="btn btn-warning icon-btn" title="Activar/Desactivar">
+                    <i class="fas fa-power-off"></i>
+                  </button>
+                </form>
+                <form method="POST" action="{{ url_for('admin.delete_reseller', reseller_id=r.id) }}"
+                      class="form-confirm inline-action-form"
+                      data-confirm-scope="REVENDEDORES"
+                      data-msg="¿Eliminar el revendedor '{{ 'Admin' if r.note == '__SYSTEM_ADMIN_OWNER__' else r.username }}'? Sus usuarios pasarán al Administrador.">
+                  <button type="submit" class="btn btn-danger icon-btn" title="Eliminar">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top border-card">
+      <small class="text-muted">Mostrando {{ resellers|length }} de {{ total }} revendedor(es).</small>
+      {% if pages > 1 %}
+      <nav aria-label="Paginación revendedores">
+        <ul class="pagination pagination-sm mb-0">
+          <li class="page-item {{ 'disabled' if not has_prev else '' }}">
+            <a class="page-link" href="{{ url_for('admin.resellers', page=page-1, per_page=per_page, q=filter_q, state=filter_state, server_id=filter_server_id) }}">Anterior</a>
+          </li>
+          <li class="page-item disabled"><span class="page-link">Página {{ page }} de {{ pages }}</span></li>
+          <li class="page-item {{ 'disabled' if not has_next else '' }}">
+            <a class="page-link" href="{{ url_for('admin.resellers', page=page+1, per_page=per_page, q=filter_q, state=filter_state, server_id=filter_server_id) }}">Siguiente</a>
+          </li>
+        </ul>
+      </nav>
+      {% endif %}
+    </div>
+    {% else %}
+      <div class="text-center py-5 text-muted">
+        <i class="fas fa-users-gear fa-3x mb-3 d-block opacity-25"></i>
+        <p>Todavía no tienes revendedores.</p>
+        <button class="btn btn-accent" data-bs-toggle="modal" data-bs-target="#addResellerModal">
+          <i class="fas fa-user-plus me-2"></i>Crear primer revendedor
+        </button>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+
+<div class="vpn-card mt-4">
+  <div class="vpn-card-header">
+    <i class="fas fa-receipt me-2 text-accent"></i>Historial de créditos
+  </div>
+  <div class="vpn-card-body p-0">
+    {% if credit_logs %}
+    <div class="table-responsive">
+      <table class="table table-dark table-hover mb-0 small reseller-credits-table credits-mobile-cards" id="creditsTableAdmin">
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Revendedor</th><th>Movimiento</th><th>Saldo</th><th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in credit_logs %}
+          <tr data-credit-state="{{ 'positive' if c.delta > 0 else 'negative' }}">
+            <td>{{ c.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+            <td>{{ 'Admin' if c.reseller and c.reseller.note == '__SYSTEM_ADMIN_OWNER__' else (c.reseller.username if c.reseller else 'No disponible') }}</td>
+            <td>
+              <span class="badge {{ 'bg-success' if c.delta > 0 else 'bg-warning text-dark' }}">
+                {{ '+' if c.delta > 0 else '' }}{{ c.delta }}
+              </span>
+            </td>
+            <td><span class="badge bg-info text-dark">{{ c.balance_after }}</span></td>
+            <td>{{ c.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-4 text-muted">Sin movimientos de créditos todavía.</div>
+    {% endif %}
+  </div>
+</div>
+
+
+<!-- ── Modal: Agregar revendedor ── -->
+<div class="modal fade" id="addResellerModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title"><i class="fas fa-user-plus me-2 text-accent"></i>Nuevo Revendedor</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('admin.resellers') }}">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label-dark">Usuario</label>
+              <input type="text" name="username" class="form-control form-control-dark"
+                     placeholder="NOMBRE-APELLIDO" required maxlength="50"
+                     pattern="^[A-ZÑ]+-[A-ZÑ]+$"
+                     title="Usa formato NOMBRE-APELLIDO en MAYUSCULAS">
+            </div>
+            <div class="col-6">
+              <label class="form-label-dark">Contraseña</label>
+              <div class="input-group">
+                <input type="password" name="password" class="form-control form-control-dark form-password-input"
+                       placeholder="••••••••" required>
+                <button class="btn btn-outline-secondary btn-toggle-pwd-form"
+                        type="button" title="Mostrar/Ocultar" aria-label="Mostrar u ocultar contraseña">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label-dark">Email (opcional)</label>
+              <input type="email" name="email" class="form-control form-control-dark"
+                     placeholder="correo@ejemplo.com" maxlength="100">
+            </div>
+            <div class="col-12">
+              <label class="form-label-dark">Servidor asignado</label>
+              <select name="server_id" class="form-select form-control-dark" required>
+                <option value="">— Seleccionar —</option>
+                {% for sv in servers %}
+                <option value="{{ sv.id }}">{{ sv.name }} ({{ sv.ip }})</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-dark">Límite de conexiones</label>
+              <input type="number" name="max_connections" class="form-control form-control-dark"
+                     value="1" min="1" max="9999" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label-dark">Créditos iniciales</label>
+              <input type="number" name="panel_credits" class="form-control form-control-dark"
+                value="0" min="0" max="999999" required>
+                 </div>
+     
+            <div class="col-12">
+              <label class="form-label-dark">Nota interna (opcional)</label>
+              <input type="text" name="note" class="form-control form-control-dark"
+                     placeholder="WhatsApp: +1234..." maxlength="200">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-user-plus me-2"></i>Crear
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal global: Editar revendedor ── -->
+<div class="modal fade" id="editResellerModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title"><i class="fas fa-pen me-2 text-accent"></i><span id="editResellerModalTitle">Editar</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="editResellerForm" action="{{ url_for('admin.edit_reseller', reseller_id=999999) }}">
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label-dark">Nueva contraseña (dejar vacío para no cambiar)</label>
+              <div class="input-group">
+                <input type="password" name="password" class="form-control form-control-dark form-password-input"
+                       placeholder="••••••••">
+                <button class="btn btn-outline-secondary btn-toggle-pwd-form"
+                        type="button" title="Mostrar/Ocultar" aria-label="Mostrar u ocultar contraseña">
+                  <i class="fas fa-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label-dark">Email</label>
+              <input type="email" name="email" class="form-control form-control-dark"
+                     value="" maxlength="100" id="editResellerEmail">
+            </div>
+            <div class="col-12">
+              <label class="form-label-dark">Servidor</label>
+              <select name="server_id" class="form-select form-control-dark" id="editResellerServerId">
+                {% for sv in servers %}
+                <option value="{{ sv.id }}">
+                  {{ sv.name }} ({{ sv.ip }})
+                </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6">
+              <label class="form-label-dark">Límite de conexiones</label>
+              <input type="number" name="max_connections" class="form-control form-control-dark"
+                     value="1" min="1" max="9999" required id="editResellerMaxConnections">
+            </div>
+            <div class="col-6">
+              <label class="form-label-dark">Créditos</label>
+              <input type="number" name="panel_credits" class="form-control form-control-dark"
+                value="0" min="0" max="999999" required id="editResellerPanelCredits">
+                 </div>
+            <div class="col-12">
+              <label class="form-label-dark">Nota interna</label>
+              <input type="text" name="note" class="form-control form-control-dark"
+                     value="" maxlength="200" id="editResellerNote">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent">
+            <i class="fas fa-floppy-disk me-2"></i>Guardar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal global: Agregar créditos ── -->
+<div class="modal fade" id="addCreditsModalGlobal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content bg-card border-card">
+      <div class="modal-header border-card">
+        <h5 class="modal-title"><i class="fas fa-money-bill-wave me-2 text-accent"></i>Gestionar Créditos</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="addCreditsForm" action="{{ url_for('admin.add_reseller_credits', reseller_id=999999) }}">
+        <div class="modal-body">
+          <p class="text-muted mb-3" id="addCreditsInfo">
+            <strong>Revendedor:</strong> -<br>
+            <strong>Saldo actual:</strong> <span class="badge bg-info text-dark">0 créditos</span>
+          </p>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label-dark">Operación</label>
+              <select class="form-select form-control-dark" name="operation" id="addCreditsOperation" required>
+                <option value="add" selected>Agregar créditos</option>
+                <option value="subtract">Quitar créditos</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label-dark">Cantidad de créditos</label>
+              <div class="input-group">
+                <input type="number" class="form-control form-control-dark" name="amount" required
+                       min="1" max="999999" value="5" autofocus>
+                <span class="input-group-text bg-dark border-dark text-light">créditos</span>
+              </div>
+              <small class="text-muted d-block mt-2" id="addCreditsHelpText">
+                Ingresa cuántos créditos deseas agregar al revendedor.
+              </small>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-card">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-accent" id="addCreditsSubmitBtn">
+            <i class="fas fa-check me-2"></i>Agregar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script>
+  $(document).ready(function () {
+    $('#resellersTable').DataTable({
+      language: { url: '//cdn.datatables.net/plug-ins/1.13.8/i18n/es-ES.json' },
+      order: [[4, 'desc']],
+      paging: false,
+      info: false,
+      searching: false,
+      columnDefs: [{ orderable: false, targets: -1 }]
+    });
+
+    const editActionTemplate = `{{ url_for('admin.edit_reseller', reseller_id=999999) }}`;
+    const creditsActionTemplate = `{{ url_for('admin.add_reseller_credits', reseller_id=999999) }}`;
+    const creditsOperation = document.getElementById('addCreditsOperation');
+    const creditsHelpText = document.getElementById('addCreditsHelpText');
+    const creditsSubmitBtn = document.getElementById('addCreditsSubmitBtn');
+
+    function updateCreditsModalUi() {
+      if (!creditsOperation) return;
+      const isSubtract = creditsOperation.value === 'subtract';
+
+      if (creditsHelpText) {
+        creditsHelpText.textContent = isSubtract
+          ? 'Ingresa cuántos créditos deseas descontar del revendedor. No puede quedar en negativo.'
+          : 'Ingresa cuántos créditos deseas agregar al revendedor.';
+      }
+
+      if (creditsSubmitBtn) {
+        creditsSubmitBtn.classList.toggle('btn-danger', isSubtract);
+        creditsSubmitBtn.classList.toggle('btn-accent', !isSubtract);
+        creditsSubmitBtn.innerHTML = isSubtract
+          ? '<i class="fas fa-minus me-2"></i>Quitar'
+          : '<i class="fas fa-check me-2"></i>Agregar';
+      }
+    }
+
+    if (creditsOperation) {
+      creditsOperation.addEventListener('change', updateCreditsModalUi);
+    }
+    updateCreditsModalUi();
+
+    if (typeof window.initFormPasswordToggle === 'function') {
+      window.initFormPasswordToggle({
+        buttonSelector: '#addResellerModal .btn-toggle-pwd-form, #editResellerModalGlobal .btn-toggle-pwd-form',
+        inputSelector: '.form-password-input',
+      });
+    }
+
+    document.querySelectorAll('.btn-open-edit-modal').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const resellerId = this.dataset.resellerId;
+        const resellerName = this.dataset.resellerName || '';
+        const email = this.dataset.email || '';
+        const serverId = this.dataset.serverId || '';
+        const maxConnections = this.dataset.maxConnections || '1';
+        const panelCredits = this.dataset.panelCredits || '0';
+        const note = this.dataset.note || '';
+
+        const form = document.getElementById('editResellerForm');
+        const title = document.getElementById('editResellerModalTitle');
+        const emailInput = document.getElementById('editResellerEmail');
+        const serverSelect = document.getElementById('editResellerServerId');
+        const maxConnectionsInput = document.getElementById('editResellerMaxConnections');
+        const panelCreditsInput = document.getElementById('editResellerPanelCredits');
+        const noteInput = document.getElementById('editResellerNote');
+
+        if (form) form.action = editActionTemplate.replace('999999', resellerId);
+        if (title) title.textContent = `Editar · ${resellerName}`;
+        if (emailInput) emailInput.value = email;
+        if (serverSelect) serverSelect.value = serverId;
+        if (maxConnectionsInput) maxConnectionsInput.value = maxConnections;
+        if (panelCreditsInput) panelCreditsInput.value = panelCredits;
+        if (noteInput) noteInput.value = note;
+      });
+    });
+
+    document.querySelectorAll('.btn-open-credits-modal').forEach(btn => {
+      btn.addEventListener('click', function () {
+        const resellerId = this.dataset.resellerId;
+        const resellerName = this.dataset.resellerName || '';
+        const resellerCredits = this.dataset.resellerCredits || '0';
+
+        const form = document.getElementById('addCreditsForm');
+        const info = document.getElementById('addCreditsInfo');
+        if (form) form.action = creditsActionTemplate.replace('999999', resellerId);
+        if (creditsOperation) creditsOperation.value = 'add';
+        updateCreditsModalUi();
+        if (info) {
+          info.innerHTML = `<strong>Revendedor:</strong> ${resellerName}<br><strong>Saldo actual:</strong> <span class="badge bg-info text-dark">${resellerCredits} créditos</span>`;
+        }
+      });
+    });
+  });
+</script>
+{% endblock %}
