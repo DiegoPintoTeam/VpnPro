@@ -1874,14 +1874,19 @@ WantedBy=multi-user.target
 
         return True, connections
 
-    def _collect_udp_custom_connections(self, window_seconds: int = 150) -> dict[str, tuple[int, int]]:
-        """Return {USERNAME_UPPER: (distinct_devices, seconds_since_last_connect)}.
+    def _collect_udp_custom_connections(self, window_seconds: int = 300) -> dict[str, tuple[int, int, int]]:
+        """Return {USERNAME_UPPER: (sessions, distinct_devices, seconds_since_last_connect)}.
 
-        El log de desconexion de udp-custom no incluye el usuario ni el mismo puerto
-        origen del connect, por lo que no se puede correlacionar sesion exacta; se usa
-        modo presencia por IP: un usuario esta online si tuvo al menos una linea
-        "Client connected" dentro de `window_seconds`, y el conteo de dispositivos se
-        toma de IPs origen distintas vistas en esa ventana (igual criterio que SSH).
+        udp-custom (basado en QUIC) migra de puerto/IP por reconexion y su log de
+        desconexion no incluye usuario ni el mismo puerto origen del connect, asi que
+        no hay forma de correlacionar sesion exacta ni de leer sockets UDP "ESTABLISHED"
+        reales (QUIC multiplexa todo sobre el mismo socket de escucha). Se usa entonces
+        modo presencia por ventana de tiempo: se toman las lineas "Client connected"
+        de los ultimos `window_seconds` (con margen amplio para tolerar reconexiones
+        cada 1-5 min observadas en producción) y se cuenta, por usuario:
+          - sessions: pares (ip, puerto) origen distintos vistos en la ventana.
+          - devices: IPs origen distintas (2 sesiones de la misma IP/NAT = 1 dispositivo,
+            mismo criterio que SSH).
         """
         ok_now, now_out, _ = self._run('date +%s')
         if not ok_now or not (now_out or '').strip().isdigit():
@@ -1889,21 +1894,21 @@ WantedBy=multi-user.target
         now_epoch = int(now_out.strip())
 
         ok_log, log_out, _ = self._run(
-            "journalctl -u udp-custom.service -o short-unix --no-pager -n 400 2>/dev/null "
+            "journalctl -u udp-custom.service -o short-unix --no-pager -n 800 2>/dev/null "
             "| grep -F 'Client connected'"
         )
         if not ok_log or not (log_out or '').strip():
             return {}
 
-        last_seen: dict[str, int] = {}
-        peers_by_user: dict[str, set[str]] = {}
+        sockets_by_user: dict[str, set[tuple[str, int]]] = {}
+        last_seen_by_user: dict[str, int] = {}
         for raw_line in (log_out or '').splitlines():
             line = (raw_line or '').strip()
             if not line:
                 continue
             ts_match = re.match(r'^(\d+)\.\d+', line)
             user_match = re.search(r'\[user:([A-Za-z0-9._-]+)\]', line)
-            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):\d+\]', line)
+            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):(\d+)\]', line)
             if not ts_match or not user_match:
                 continue
             try:
@@ -1915,17 +1920,18 @@ WantedBy=multi-user.target
             username = user_match.group(1).strip().upper()
             if not username or not _USERNAME_RE.match(username):
                 continue
-            if ts > last_seen.get(username, 0):
-                last_seen[username] = ts
-            peer_ip = (src_match.group(1) if src_match else 'UNKNOWN').strip()
-            peers_by_user.setdefault(username, set()).add(peer_ip)
+            ip = src_match.group(1).strip() if src_match else 'UNKNOWN'
+            port = int(src_match.group(2)) if src_match else 0
+            sockets_by_user.setdefault(username, set()).add((ip, port))
+            last_seen_by_user[username] = max(last_seen_by_user.get(username, 0), ts)
 
-        online: dict[str, tuple[int, int]] = {}
-        for username, ts in last_seen.items():
-            age = now_epoch - ts
-            devices = max(1, len(peers_by_user.get(username, set())))
-            online[username] = (devices, age)
-        return online
+        result: dict[str, tuple[int, int, int]] = {}
+        for username, sockets in sockets_by_user.items():
+            sessions = len(sockets)
+            devices = max(1, len({ip for ip, _port in sockets}))
+            age = max(0, now_epoch - last_seen_by_user.get(username, now_epoch))
+            result[username] = (sessions, devices, age)
+        return result
 
     def _merge_udp_custom_presence(
         self,
@@ -1933,13 +1939,14 @@ WantedBy=multi-user.target
         devices_by_user: dict[str, int],
         connected_seconds_by_user: dict[str, int],
     ) -> None:
-        for username, (devices, age) in self._collect_udp_custom_connections().items():
-            sessions_by_user[username] = sessions_by_user.get(username, 0) + devices
+        for username, (sessions, devices, age) in self._collect_udp_custom_connections().items():
+            sessions_by_user[username] = sessions_by_user.get(username, 0) + sessions
             devices_by_user[username] = devices_by_user.get(username, 0) + devices
             connected_seconds_by_user[username] = min(
                 connected_seconds_by_user.get(username, age),
                 age,
             )
+
 
     def get_online_user_snapshot(self) -> tuple[bool, dict[str, int], dict[str, int], dict[str, int], str]:
         ok, msg = self.connect()
