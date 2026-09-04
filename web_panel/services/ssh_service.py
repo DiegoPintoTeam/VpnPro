@@ -1519,15 +1519,20 @@ WantedBy=multi-user.target
                 'systemctl disable --now udp-custom.service >/dev/null 2>&1; '
                 'pkill -9 -f "/root/udp/udp-custom" >/dev/null 2>&1; '
                 'rm -f /root/udp/udp-custom; '
-                'mkdir -p /root/udp; '
                 'true'
             )
 
             bin_url = 'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
-            ok2, _, err = self._run(
-                f'(command -v curl >/dev/null 2>&1 && curl -fsSL --retry 2 --connect-timeout 20 -o /root/udp/udp-custom "{bin_url}") '
-                f'|| (command -v wget >/dev/null 2>&1 && wget -T 20 -t 2 -q -O /root/udp/udp-custom "{bin_url}")'
+            download_cmd = (
+                'mkdir -p /root/udp && '
+                f'((command -v curl >/dev/null 2>&1 && curl -fsSL --retry 2 --connect-timeout 20 -o /root/udp/udp-custom "{bin_url}") '
+                f'|| (command -v wget >/dev/null 2>&1 && wget -T 20 -t 2 -q -O /root/udp/udp-custom "{bin_url}"))'
             )
+            # mkdir y descarga en un solo comando: evita que una accion "cerrar" concurrente
+            # (rm -rf /root/udp) borre el directorio entre llamadas SSH separadas.
+            ok2, _, err = self._run(download_cmd)
+            if not ok2:
+                ok2, _, err = self._run(download_cmd)
             if not ok2:
                 return False, err or 'No se pudo descargar el binario udp-custom (revisa conectividad saliente del VPS)'
 
