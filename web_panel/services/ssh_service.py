@@ -1507,19 +1507,40 @@ WantedBy=multi-user.target
         if not ok:
             return False, f'No se pudo conectar: {msg}'
         try:
+            _, arch_out, _ = self._run('uname -m')
+            arch = (arch_out or '').strip().lower()
+            if arch not in {'x86_64', 'amd64'}:
+                return False, (
+                    f'Arquitectura no soportada ({arch or "desconocida"}). '
+                    'UDP Custom solo publica binario linux-amd64.'
+                )
+
             self._run(
                 'systemctl disable --now udp-custom.service >/dev/null 2>&1; '
                 'pkill -9 -f "/root/udp/udp-custom" >/dev/null 2>&1; '
+                'rm -f /root/udp/udp-custom; '
                 'mkdir -p /root/udp; '
                 'true'
             )
 
+            bin_url = 'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
             ok2, _, err = self._run(
-                'wget -T 20 -t 2 -q -O /root/udp/udp-custom '
-                'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
+                f'(command -v curl >/dev/null 2>&1 && curl -fsSL --retry 2 --connect-timeout 20 -o /root/udp/udp-custom "{bin_url}") '
+                f'|| (command -v wget >/dev/null 2>&1 && wget -T 20 -t 2 -q -O /root/udp/udp-custom "{bin_url}")'
             )
             if not ok2:
-                return False, err or 'No se pudo descargar el binario udp-custom'
+                return False, err or 'No se pudo descargar el binario udp-custom (revisa conectividad saliente del VPS)'
+
+            ok2, out, err = self._run(
+                'test -s /root/udp/udp-custom && head -c4 /root/udp/udp-custom | od -An -tx1 | tr -d " \\n"'
+            )
+            magic = (out or '').strip().lower()
+            if not ok2 or magic != '7f454c46':
+                preview = ''
+                if magic and magic != '7f454c46':
+                    _, preview, _ = self._run('head -c200 /root/udp/udp-custom 2>/dev/null | tr -d "\\0"')
+                detail = f' Contenido recibido: {preview.strip()[:150]}' if preview.strip() else ''
+                return False, f'La descarga de udp-custom no es un binario valido (posible 404 o bloqueo de red).{detail}'
 
             ok2, _, err = self._run('chmod +x /root/udp/udp-custom && [ -x /root/udp/udp-custom ]')
             if not ok2:
@@ -1564,7 +1585,14 @@ WantedBy=multi-user.target
 
             ok2, _, err = self._run('systemctl is-active --quiet udp-custom.service')
             if not ok2:
-                return False, err or 'Servicio udp-custom no está activo. Verifica con: systemctl status udp-custom'
+                _, diag_out, _ = self._run(
+                    'systemctl --no-pager --full status udp-custom.service 2>&1 | tail -n 15; '
+                    'journalctl -u udp-custom.service -n 15 --no-pager 2>&1 | tail -n 15'
+                )
+                detail = (err or '').strip()
+                if diag_out:
+                    detail = f'{detail} | {diag_out.strip()}' if detail else diag_out.strip()
+                return False, detail or 'Servicio udp-custom no está activo. Verifica con: systemctl status udp-custom'
 
             self._allow_firewall_port(port, 'udp')
 
