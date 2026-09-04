@@ -1522,6 +1522,14 @@ WantedBy=multi-user.target
                 'true'
             )
 
+            # Best-effort: conntrack permite detectar dispositivos reales tras el mismo
+            # NAT para el limitador (ver _collect_udp_custom_active_flows); si falla la
+            # instalacion, la deteccion simplemente hace fallback a conteo por IP.
+            self._run(
+                'command -v conntrack >/dev/null 2>&1 || '
+                '(apt-get update -y >/dev/null 2>&1 && apt-get install -y conntrack >/dev/null 2>&1) || true'
+            )
+
             bin_url = 'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
             download_cmd = (
                 'mkdir -p /root/udp && '
@@ -1874,19 +1882,55 @@ WantedBy=multi-user.target
 
         return True, connections
 
+    def _get_udp_custom_port(self) -> int | None:
+        _, out, _ = self._run(
+            "sed -n 's/.*\"listen\": *\":\\?\\([0-9]\\+\\)\".*/\\1/p' /root/udp/config.json 2>/dev/null | head -n1"
+        )
+        value = (out or '').strip()
+        return int(value) if value.isdigit() else None
+
+    def _collect_udp_custom_active_flows(self, port: int) -> set[tuple[str, int]] | None:
+        """Return {(ip_origen, puerto_origen)} de flujos UDP vivos en conntrack hacia
+        *port*, o None si `conntrack` no esta instalado (para hacer fallback seguro).
+
+        A diferencia del log, conntrack refleja el estado REAL del kernel: un flujo
+        deja de aparecer en cuanto expira su timeout sin trafico, sin importar que
+        el binario multiplexe todo sobre un solo socket QUIC.
+        """
+        ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
+        if not ok_bin:
+            return None
+
+        ok, out, _ = self._run(f'conntrack -L -p udp --dport {port} -n 2>/dev/null')
+        if not ok:
+            return set()
+
+        flows: set[tuple[str, int]] = set()
+        for raw_line in (out or '').splitlines():
+            pairs = re.findall(
+                r'src=([0-9a-fA-F:.]+)\s+dst=[0-9a-fA-F:.]+\s+sport=(\d+)\s+dport=(\d+)',
+                raw_line,
+            )
+            if not pairs:
+                continue
+            ip, sport, dport = pairs[0]
+            if int(dport) == port:
+                flows.add((ip, int(sport)))
+        return flows
+
     def _collect_udp_custom_connections(self, window_seconds: int = 300) -> dict[str, tuple[int, int, int]]:
         """Return {USERNAME_UPPER: (sessions, distinct_devices, seconds_since_last_connect)}.
 
         udp-custom (basado en QUIC) reconecta/migra de puerto cada 1-5 min aunque sea
-        el MISMO dispositivo (confirmado: un solo cliente genera varias lineas
-        "Client connected" con distinto puerto origen dentro de una misma ventana), y
-        el log de desconexion no incluye usuario ni el mismo puerto origen del connect,
-        asi que no hay forma de correlacionar sesion exacta ni de leer sockets UDP
-        "ESTABLISHED" reales (QUIC multiplexa todo sobre el mismo socket de escucha).
-        Por eso NO se cuenta por (ip, puerto) -- eso infla sesiones de un solo
-        dispositivo que reconecta seguido. Se usa unicamente IPs origen distintas
-        dentro de `window_seconds` como proxy de dispositivos, y sessions=devices
-        (no se puede distinguir de forma confiable 2 dispositivos tras el mismo NAT).
+        el MISMO dispositivo, y su log de desconexion no incluye usuario ni el mismo
+        puerto origen del connect, asi que no se puede correlacionar sesion exacta solo
+        con el log (contar por (ip, puerto) del log infla sesiones de un solo
+        dispositivo que reconecta seguido). Para distinguir dispositivos reales tras el
+        mismo NAT se cruza con `conntrack` (flujos UDP vivos en el kernel, ver
+        `_collect_udp_custom_active_flows`): solo cuentan las lineas del log cuyo
+        (ip, puerto) sigue teniendo un flujo activo AHORA. Si `conntrack` no esta
+        disponible, se hace fallback a contar solo por IP origen distinta (mismo
+        criterio que SSH, pero sin distinguir 2 dispositivos tras el mismo NAT).
         """
         ok_now, now_out, _ = self._run('date +%s')
         if not ok_now or not (now_out or '').strip().isdigit():
@@ -1900,7 +1944,7 @@ WantedBy=multi-user.target
         if not ok_log or not (log_out or '').strip():
             return {}
 
-        peers_by_user: dict[str, set[str]] = {}
+        sockets_by_user: dict[str, set[tuple[str, int]]] = {}
         last_seen_by_user: dict[str, int] = {}
         for raw_line in (log_out or '').splitlines():
             line = (raw_line or '').strip()
@@ -1908,7 +1952,7 @@ WantedBy=multi-user.target
                 continue
             ts_match = re.match(r'^(\d+)\.\d+', line)
             user_match = re.search(r'\[user:([A-Za-z0-9._-]+)\]', line)
-            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):\d+\]', line)
+            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):(\d+)\]', line)
             if not ts_match or not user_match:
                 continue
             try:
@@ -1921,14 +1965,24 @@ WantedBy=multi-user.target
             if not username or not _USERNAME_RE.match(username):
                 continue
             ip = src_match.group(1).strip() if src_match else 'UNKNOWN'
-            peers_by_user.setdefault(username, set()).add(ip)
+            port = int(src_match.group(2)) if src_match else 0
+            sockets_by_user.setdefault(username, set()).add((ip, port))
             last_seen_by_user[username] = max(last_seen_by_user.get(username, 0), ts)
 
+        control_port = self._get_udp_custom_port()
+        active_flows = self._collect_udp_custom_active_flows(control_port) if control_port else None
+
         result: dict[str, tuple[int, int, int]] = {}
-        for username, peers in peers_by_user.items():
-            devices = max(1, len(peers))
+        for username, sockets in sockets_by_user.items():
+            if active_flows is not None:
+                live = {s for s in sockets if s in active_flows}
+                reference = live or sockets
+            else:
+                reference = sockets
+            devices = max(1, len({ip for ip, _port in reference}))
+            sessions = len(reference) if active_flows is not None else devices
             age = max(0, now_epoch - last_seen_by_user.get(username, now_epoch))
-            result[username] = (devices, devices, age)
+            result[username] = (sessions, devices, age)
         return result
 
 
