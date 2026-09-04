@@ -1874,6 +1874,66 @@ WantedBy=multi-user.target
 
         return True, connections
 
+    def _collect_udp_custom_connections(self, window_seconds: int = 150) -> dict[str, int]:
+        """Return {USERNAME_UPPER: seconds_since_last_connect} para clientes UDP Custom.
+
+        El log de desconexion de udp-custom no incluye el usuario ni el mismo puerto
+        origen del connect, por lo que no se puede correlacionar sesion exacta; se usa
+        modo presencia: un usuario se considera online si su ultima linea
+        "Client connected" ocurrio dentro de `window_seconds`.
+        """
+        ok_now, now_out, _ = self._run('date +%s')
+        if not ok_now or not (now_out or '').strip().isdigit():
+            return {}
+        now_epoch = int(now_out.strip())
+
+        ok_log, log_out, _ = self._run(
+            "journalctl -u udp-custom.service -o short-unix --no-pager -n 400 2>/dev/null "
+            "| grep -F 'Client connected'"
+        )
+        if not ok_log or not (log_out or '').strip():
+            return {}
+
+        last_seen: dict[str, int] = {}
+        for raw_line in (log_out or '').splitlines():
+            line = (raw_line or '').strip()
+            if not line:
+                continue
+            ts_match = re.match(r'^(\d+)\.\d+', line)
+            user_match = re.search(r'\[user:([A-Za-z0-9._-]+)\]', line)
+            if not ts_match or not user_match:
+                continue
+            try:
+                ts = int(ts_match.group(1))
+            except ValueError:
+                continue
+            username = user_match.group(1).strip().upper()
+            if not username or not _USERNAME_RE.match(username):
+                continue
+            if ts > last_seen.get(username, 0):
+                last_seen[username] = ts
+
+        online: dict[str, int] = {}
+        for username, ts in last_seen.items():
+            age = now_epoch - ts
+            if 0 <= age <= window_seconds:
+                online[username] = age
+        return online
+
+    def _merge_udp_custom_presence(
+        self,
+        sessions_by_user: dict[str, int],
+        devices_by_user: dict[str, int],
+        connected_seconds_by_user: dict[str, int],
+    ) -> None:
+        for username, age in self._collect_udp_custom_connections().items():
+            sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
+            devices_by_user[username] = devices_by_user.get(username, 0) + 1
+            connected_seconds_by_user[username] = min(
+                connected_seconds_by_user.get(username, age),
+                age,
+            )
+
     def get_online_user_snapshot(self) -> tuple[bool, dict[str, int], dict[str, int], dict[str, int], str]:
         ok, msg = self.connect()
         if not ok:
@@ -1898,6 +1958,7 @@ WantedBy=multi-user.target
                     user: len(peers)
                     for user, peers in peers_by_user.items()
                 }
+                self._merge_udp_custom_presence(sessions_by_user, devices_by_user, connected_seconds_by_user)
                 return True, sessions_by_user, devices_by_user, connected_seconds_by_user, ''
 
             ok_who, who_out, who_err = self._run('who')
@@ -1921,7 +1982,8 @@ WantedBy=multi-user.target
                 sessions_by_user[normalized_user] = sessions_by_user.get(normalized_user, 0) + 1
                 devices_by_user[normalized_user] = devices_by_user.get(normalized_user, 0) + 1
 
-            return True, sessions_by_user, devices_by_user, {}, ''
+            self._merge_udp_custom_presence(sessions_by_user, devices_by_user, connected_seconds_by_user)
+            return True, sessions_by_user, devices_by_user, connected_seconds_by_user, ''
         finally:
             self.disconnect()
 
