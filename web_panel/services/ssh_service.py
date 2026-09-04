@@ -2169,7 +2169,8 @@ WantedBy=multi-user.target
             ok2, out, _ = self._run(f'id {username} 2>/dev/null && echo EXISTS || echo NEW')
             already_exists = 'EXISTS' in out
 
-            expiry = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
+            # UTC para coincidir con el reloj esperado del VPS y con VpnUser.expiry_date.
+            expiry = (datetime.utcnow() + timedelta(days=days)).strftime('%Y-%m-%d')
 
             if already_exists:
                 # Upsert: unlock + update expiry, password and limit without recreating
@@ -2283,7 +2284,7 @@ WantedBy=multi-user.target
         if len(new_password) < 4:
             return False, 'La contraseña debe tener al menos 4 caracteres'
 
-        ok, msg = self.connect()
+        ok, msg, opened_here = self._connect_if_needed()
         if not ok:
             return False, f'No se pudo conectar: {msg}'
         try:
@@ -2300,13 +2301,14 @@ WantedBy=multi-user.target
                 raise
             return True, 'Contraseña cambiada exitosamente'
         finally:
-            self.disconnect()
+            if opened_here:
+                self.disconnect()
 
     def change_limit(self, username: str, new_limit: int) -> tuple[bool, str]:
         if not _USERNAME_RE.match(username):
             return False, 'Nombre de usuario inválido'
 
-        ok, msg = self.connect()
+        ok, msg, opened_here = self._connect_if_needed()
         if not ok:
             return False, f'No se pudo conectar: {msg}'
         try:
@@ -2325,7 +2327,8 @@ WantedBy=multi-user.target
                 raise
             return True, 'Límite de conexiones actualizado'
         finally:
-            self.disconnect()
+            if opened_here:
+                self.disconnect()
 
     def change_expiry(self, username: str, days: int) -> tuple[bool, str]:
         if not _USERNAME_RE.match(username):
@@ -2333,11 +2336,12 @@ WantedBy=multi-user.target
         if days < 1:
             return False, 'Los días deben ser al menos 1'
 
-        ok, msg = self.connect()
+        ok, msg, opened_here = self._connect_if_needed()
         if not ok:
             return False, f'No se pudo conectar: {msg}'
         try:
-            expiry = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
+            # UTC para coincidir con el reloj esperado del VPS y con VpnUser.expiry_date.
+            expiry = (datetime.utcnow() + timedelta(days=days)).strftime('%Y-%m-%d')
             ok2, _, err = self._run(f'chage -E {expiry} {username}')
             if not ok2:
                 if _is_disk_full_error(err):
@@ -2345,7 +2349,8 @@ WantedBy=multi-user.target
                 return False, f'Error: {err}'
             return True, f'Expiración actualizada a {expiry}'
         finally:
-            self.disconnect()
+            if opened_here:
+                self.disconnect()
 
     def set_expiry_date(self, username: str, expiry_date: datetime) -> tuple[bool, str]:
         if not _USERNAME_RE.match(username):
