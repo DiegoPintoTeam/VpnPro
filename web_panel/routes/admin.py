@@ -1036,6 +1036,22 @@ def _background_sync_deleted_server_users(
             db.session.remove()
             return
 
+        can_write, guard_msg = guard_server_storage_before_account_write(svc)
+        if not can_write:
+            _update_delete_sync_status(
+                sync_id,
+                status='failed',
+                message=guard_msg,
+            )
+            app.logger.error(
+                "Eliminación de servidor '%s': almacenamiento crítico en servidor destino '%s', se cancela sincronización: %s",
+                source_server_name,
+                target_server_name,
+                guard_msg,
+            )
+            db.session.remove()
+            return
+
         created = 0
         already_existed = 0
         failed = 0
@@ -1379,6 +1395,10 @@ def _start_user_sync_background(
 
 def _sync_server_users_data(server: Server, delete_remote: bool = True) -> tuple[bool, dict[str, int], str]:
     svc = SSHService(server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return False, {}, guard_msg
+
     ok, remote_users, err = svc.list_users_for_sync()
     if not ok:
         return False, {}, err
@@ -1681,6 +1701,18 @@ def _background_transfer_server_users(
                 sync_id,
                 status='failed',
                 message=f"No se pudo conectar al VPS origen: {err_source}",
+            )
+            db.session.remove()
+            return
+
+        can_write, guard_msg = guard_server_storage_before_account_write(target_svc)
+        if not can_write:
+            target_svc.disconnect()
+            source_svc.disconnect()
+            _update_delete_sync_status(
+                sync_id,
+                status='failed',
+                message=guard_msg,
             )
             db.session.remove()
             return
@@ -3605,6 +3637,10 @@ def renew_user(user_id: int):
     new_expiry, days_from_now = compute_renewal_dates(u.expiry_date, package.get('days', 30))
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_admin_users_action(guard_msg, 'danger', ok=False, status_code=400)
+
     ok, msg = svc.change_expiry(u.username, days_from_now)
     if not ok:
         return _respond_admin_users_action(f'Error al renovar usuario en servidor: {msg}', 'danger', ok=False, status_code=400)
@@ -3660,6 +3696,10 @@ def unblock_user(user_id: int):
         return _respond_admin_user_not_found()
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_admin_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_block_state(u, False, svc, db.session)
     if ok:
         ok_trim, trim_msg = enforce_user_connection_limit(u, svc)
@@ -3728,6 +3768,10 @@ def change_password(user_id: int):
 
     new_password = request.form.get('password', '')
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_admin_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_password_change(u, new_password, svc, db.session)
     if ok:
         return _respond_admin_users_action(msg, 'success', ok=True, user=u)
@@ -3750,6 +3794,10 @@ def change_limit(user_id: int):
         return _respond_admin_users_action('Límite inválido.', 'danger', ok=False, status_code=400)
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_admin_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_limit_change(u, new_limit, svc, db.session)
     if ok:
         return _respond_admin_users_action(msg, 'success', ok=True, user=u)
@@ -3805,6 +3853,10 @@ def move_user_server(user_id: int):
     limit = max(1, int(u.connection_limit or 1))
 
     target_svc = SSHService(target_server)
+    can_write, guard_msg = guard_server_storage_before_account_write(target_svc)
+    if not can_write:
+        return _respond_admin_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok_create, msg_create = target_svc.create_user(u.username, password, create_days, limit)
     if not ok_create:
         return _respond_admin_users_action(

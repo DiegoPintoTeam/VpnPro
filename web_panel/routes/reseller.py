@@ -563,6 +563,10 @@ def change_password(user_id: int):
 
     new_password = request.form.get('password', '')
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_reseller_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_password_change(u, new_password, svc, db.session)
     if ok:
         return _respond_reseller_users_action(msg, 'success', ok=True, user=u)
@@ -594,6 +598,10 @@ def change_limit(user_id: int):
         )
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_reseller_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_limit_change(u, new_limit, svc, db.session)
     if ok:
         return _respond_reseller_users_action(msg, 'success', ok=True, user=u)
@@ -633,6 +641,10 @@ def change_expiry(user_id: int):
     new_expiry, days_from_now = compute_renewal_dates(u.expiry_date, package.get('days', 30))
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_reseller_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = svc.change_expiry(u.username, days_from_now)
     if ok:
         u.expiry_date = new_expiry
@@ -688,6 +700,10 @@ def unblock_user(user_id: int):
         return _respond_reseller_user_not_found()
 
     svc = SSHService(u.server)
+    can_write, guard_msg = guard_server_storage_before_account_write(svc)
+    if not can_write:
+        return _respond_reseller_users_action(guard_msg, 'danger', ok=False, user=u, status_code=400)
+
     ok, msg = apply_user_block_state(u, False, svc, db.session)
     if ok:
         ok_trim, trim_msg = enforce_user_connection_limit(u, svc)
