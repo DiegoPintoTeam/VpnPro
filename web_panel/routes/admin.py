@@ -2525,7 +2525,7 @@ def open_server_port(server_id: int):
         except ValueError:
             port = 0
 
-        if module not in {'http_vpnpro', 'ssl_tunnel', 'websocket_tunnel', 'badvpn_udp', 'checkuser'}:
+        if module not in {'http_vpnpro', 'ssl_tunnel', 'websocket_tunnel', 'badvpn_udp', 'udp_custom', 'checkuser'}:
             return _json_or_redirect(False, 'Modulo de puertos invalido.', 'danger')
 
         if action not in {'open', 'close'}:
@@ -2538,6 +2538,8 @@ def open_server_port(server_id: int):
             svc = SSHService(server)
             if module == 'badvpn_udp':
                 ok, msg = svc.disable_badvpn_udpgw()
+            elif module == 'udp_custom':
+                ok, msg = svc.disable_udp_custom()
             elif module == 'checkuser':
                 ok, msg = svc.uninstall_checkuser()
             elif module == 'http_vpnpro':
@@ -2558,7 +2560,7 @@ def open_server_port(server_id: int):
             return _json_or_redirect(False, 'Puerto invalido. Debe estar entre 1 y 65535.', 'danger')
 
         svc = SSHService(server)
-        open_protocols = ['udp'] if module == 'badvpn_udp' else ['tcp']
+        open_protocols = ['udp'] if module in {'badvpn_udp', 'udp_custom'} else ['tcp']
         fw_ok, fw_msg = svc.open_port_rules(port, open_protocols)
         if not fw_ok:
             return _json_or_redirect(False, f"[{server.name}] No se pudo abrir el puerto en firewall: {fw_msg}", 'danger')
@@ -2572,6 +2574,8 @@ def open_server_port(server_id: int):
             ok, msg = svc.setup_ssl_tunnel(port)
         elif module == 'badvpn_udp':
             ok, msg = svc.setup_badvpn_udpgw(port)
+        elif module == 'udp_custom':
+            ok, msg = svc.setup_udp_custom(port)
         elif module == 'checkuser':
             ok, msg = svc.install_checkuser(port)
         else:

@@ -1465,6 +1465,129 @@ WantedBy=multi-user.target
         finally:
             self.disconnect()
 
+    def _open_udp_full_range(self, exclude_ports: list[int] | None = None) -> tuple[bool, str]:
+        """Abre el rango completo 1-65535/udp en el firewall, replicando la logica del
+        instalador oficial de UDP Custom (http-custom/udp-custom), que habilita todo el
+        rango para la app HTTP Custom y permite excluir puertos ya usados por otros
+        tuneles UDP (badvpn, OpenVPN, WireGuard, DNS, etc.)."""
+        exclude = sorted({p for p in (exclude_ports or []) if self._valid_port(p)})
+        exclude_cmd = ''
+        if exclude:
+            ports_csv = ' '.join(str(p) for p in exclude)
+            exclude_cmd = (
+                f'for p in {ports_csv}; do ufw delete allow "$p"/udp >/dev/null 2>&1 || true; '
+                f'iptables -D INPUT -p udp --dport "$p" -j ACCEPT >/dev/null 2>&1 || true; done; '
+            )
+        cmd = (
+            'if command -v ufw >/dev/null 2>&1; then '
+            '  ufw allow 1:65535/udp >/dev/null 2>&1 || true; '
+            'fi; '
+            'if command -v iptables >/dev/null 2>&1; then '
+            '  iptables -C INPUT -p udp --dport 1:65535 -j ACCEPT >/dev/null 2>&1 || '
+            '  iptables -I INPUT -p udp --dport 1:65535 -j ACCEPT >/dev/null 2>&1 || true; '
+            'fi; '
+            f'{exclude_cmd}'
+        )
+        ok, _, err = self._run(cmd)
+        if not ok:
+            return False, err or 'No se pudo abrir el rango UDP 1-65535 en firewall'
+        return True, 'Rango UDP 1-65535 abierto en firewall.'
+
+    def setup_udp_custom(self, port: int = 36712, exclude_ports: list[int] | None = None) -> tuple[bool, str]:
+        """Instala UDP Custom (http-custom/udp-custom) para la app HTTP Custom.
+
+        Mantiene la logica del proyecto original: un binario que escucha en un puerto
+        de control configurable y el rango completo 1-65535/udp abierto en el firewall
+        para que la app pueda usar cualquier puerto UDP.
+        """
+        if not self._valid_port(port):
+            return False, 'Puerto invalido (1-65535).'
+
+        ok, msg, opened_here = self._connect_if_needed()
+        if not ok:
+            return False, f'No se pudo conectar: {msg}'
+        try:
+            self._run(
+                'systemctl disable --now udp-custom.service >/dev/null 2>&1; '
+                'pkill -9 -f "/root/udp/udp-custom" >/dev/null 2>&1; '
+                'mkdir -p /root/udp; '
+                'true'
+            )
+
+            ok2, _, err = self._run(
+                'wget -T 20 -t 2 -q -O /root/udp/udp-custom '
+                'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
+            )
+            if not ok2:
+                return False, err or 'No se pudo descargar el binario udp-custom'
+
+            ok2, _, err = self._run('chmod +x /root/udp/udp-custom && [ -x /root/udp/udp-custom ]')
+            if not ok2:
+                return False, 'udp-custom no está disponible en /root/udp'
+
+            config = (
+                '{\n'
+                f'  "listen": ":{port}",\n'
+                '  "stream_buffer": 33554432,\n'
+                '  "receive_buffer": 83886080,\n'
+                '  "auth": {\n'
+                '    "mode": "passwords"\n'
+                '  }\n'
+                '}\n'
+            )
+            self._sftp_write('/root/udp/config.json', config)
+
+            service = (
+                '[Unit]\n'
+                'Description=UDP Custom by ePro Dev.Team\n'
+                'After=network.target\n'
+                '\n'
+                '[Service]\n'
+                'User=root\n'
+                'Type=simple\n'
+                'ExecStart=/root/udp/udp-custom server\n'
+                'WorkingDirectory=/root/udp/\n'
+                'Restart=always\n'
+                'RestartSec=2s\n'
+                '\n'
+                '[Install]\n'
+                'WantedBy=multi-user.target\n'
+            )
+            self._sftp_write('/etc/systemd/system/udp-custom.service', service)
+
+            ok2, _, err = self._run(
+                'systemctl daemon-reload && systemctl enable udp-custom >/dev/null 2>&1 '
+                '&& systemctl restart udp-custom'
+            )
+            if not ok2:
+                return False, err or 'No se pudo crear/iniciar servicio udp-custom'
+
+            ok2, _, err = self._run('systemctl is-active --quiet udp-custom.service')
+            if not ok2:
+                return False, err or 'Servicio udp-custom no está activo. Verifica con: systemctl status udp-custom'
+
+            self._allow_firewall_port(port, 'udp')
+
+            fw_ok, fw_msg = self._open_udp_full_range(exclude_ports)
+            suffix = f' {fw_msg}' if fw_ok else f' Aviso: {fw_msg}'
+            return True, f'UDP Custom activo en el puerto {port}/udp.{suffix}'
+        finally:
+            if opened_here:
+                self.disconnect()
+
+    def disable_udp_custom(self) -> tuple[bool, str]:
+        ok, msg = self.connect()
+        if not ok:
+            return False, f'No se pudo conectar: {msg}'
+        try:
+            self._run('systemctl disable --now udp-custom.service >/dev/null 2>&1 || true')
+            self._run('rm -f /etc/systemd/system/udp-custom.service')
+            self._run('rm -rf /root/udp')
+            self._run('systemctl daemon-reload')
+            return True, 'UDP Custom desactivado.'
+        finally:
+            self.disconnect()
+
     def disable_http_vpnpro_tunnel(self) -> tuple[bool, str]:
         return self._disable_tunnel_service(
             service_name='ssh-http.service',
@@ -1523,6 +1646,13 @@ WantedBy=multi-user.target
                     'proto': 'udp',
                     'listener_proto': 'udp',
                     'port': 7300,
+                },
+                'udp_custom': {
+                    'service': 'udp-custom.service',
+                    'label': 'UDP Custom',
+                    'proto': 'udp',
+                    'listener_proto': 'udp',
+                    'port_cmd': "sed -n 's/.*\"listen\": *\":\\?\\([0-9]\\+\\)\".*/\\1/p' /root/udp/config.json 2>/dev/null | head -n1",
                 },
                 'checkuser': {
                     'service': 'checkuser.service',

@@ -356,6 +356,15 @@
               <div class="col-12">
                 <div class="rounded-2 px-2 py-2" style="border:1px solid var(--border-color, rgba(148,163,184,.2)); background:var(--bg-card, rgba(15,23,42,.22));">
                   <div class="d-grid align-items-center" style="grid-template-columns:minmax(0,1fr) auto auto; gap:10px;">
+                    <span class="text-truncate pe-2" style="color:var(--text-primary, #e5edf5);">UDP Custom</span>
+                    <span class="badge js-status-badge bg-secondary text-nowrap" data-module="udp_custom">Sin conexion</span>
+                    <span class="text-nowrap text-end js-status-port" data-module="udp_custom" data-default-proto="udp" style="min-width:88px; color:var(--text-secondary, var(--text-muted, #94a3b8));">-/udp</span>
+                  </div>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="rounded-2 px-2 py-2" style="border:1px solid var(--border-color, rgba(148,163,184,.2)); background:var(--bg-card, rgba(15,23,42,.22));">
+                  <div class="d-grid align-items-center" style="grid-template-columns:minmax(0,1fr) auto auto; gap:10px;">
                     <span class="text-truncate pe-2" style="color:var(--text-primary, #e5edf5);">CheckUser</span>
                     <span class="badge js-status-badge bg-secondary text-nowrap" data-module="checkuser">Sin conexion</span>
                     <span class="text-nowrap text-end js-status-port" data-module="checkuser" data-default-proto="tcp" style="min-width:88px; color:var(--text-secondary, var(--text-muted, #94a3b8));">-/tcp</span>
@@ -386,6 +395,7 @@
                 <option value="ssl_tunnel" data-default-port="443">SSL Tunnel</option>
                 <option value="websocket_tunnel" data-default-port="80">WebSocket Tunnel</option>
                 <option value="badvpn_udp" data-default-port="7300">BadVPN UDPGW</option>
+                <option value="udp_custom" data-default-port="36712">UDP Custom (rango 1-65535)</option>
                 <option value="checkuser" data-default-port="2052">CheckUser</option>
               </select>
             </div>
