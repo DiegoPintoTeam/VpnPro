@@ -3634,7 +3634,7 @@ def renew_user(user_id: int):
     if not can_charge:
         return _respond_admin_users_action(charge_msg, 'danger', ok=False, status_code=400)
 
-    new_expiry, days_from_now = compute_renewal_dates(u.expiry_date, package.get('days', 30))
+    new_expiry, days_from_now = compute_renewal_dates(u.expiry_date, package.get('days', 31))
 
     svc = SSHService(u.server)
     can_write, guard_msg = guard_server_storage_before_account_write(svc)

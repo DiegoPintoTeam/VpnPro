@@ -20,10 +20,10 @@ VPN_USERNAME_PATTERN = re.compile(r'^[A-Z]+-[A-Z]+(?:-\d{2})?$')
 DEMO_MAX_HOURS = 1
 PACKAGE_OPTIONS = {
     'demo_1h': {'label': 'Demo 1 hora', 'hours': 1, 'months': 0, 'credits': 0},
-    '1m': {'label': '1 Mes', 'days': 30, 'months': 1, 'credits': 1},
-    '3m': {'label': '3 Meses', 'days': 90, 'months': 3, 'credits': 3},
-    '6m': {'label': '6 Meses', 'days': 180, 'months': 6, 'credits': 6},
-    '12m': {'label': '12 Meses', 'days': 360, 'months': 12, 'credits': 12},
+    '1m': {'label': '1 Mes', 'days': 31, 'months': 1, 'credits': 1},
+    '3m': {'label': '3 Meses', 'days': 93, 'months': 3, 'credits': 3},
+    '6m': {'label': '6 Meses', 'days': 186, 'months': 6, 'credits': 6},
+    '12m': {'label': '12 Meses', 'days': 372, 'months': 12, 'credits': 12},
 }
 _RUNTIME_CACHE: dict[str, tuple[float, object]] = {}
 _RUNTIME_CACHE_LOCK = Lock()
