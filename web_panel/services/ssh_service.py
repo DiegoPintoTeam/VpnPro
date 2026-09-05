@@ -1573,7 +1573,7 @@ WantedBy=multi-user.target
                 detail = f' Contenido recibido: {preview.strip()[:150]}' if preview.strip() else ''
                 return False, f'La descarga de udp-custom no es un binario valido (posible 404 o bloqueo de red).{detail}'
 
-            ok2, _, err = self._run('chmod +x /root/udp/udp-custom && [ -x /root/udp/udp-custom ]')
+            ok2, _, _ = self._run('chmod +x /root/udp/udp-custom && [ -x /root/udp/udp-custom ]')
             if not ok2:
                 return False, 'udp-custom no está disponible en /root/udp'
 
