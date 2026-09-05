@@ -39,7 +39,7 @@ PACKAGE_OPTIONS = {
 _RUNTIME_CACHE: dict[str, tuple[float, object]] = {}
 _RUNTIME_CACHE_LOCK = Lock()
 _AUTO_TRIM_USER_COOLDOWN_SECONDS = 12
-_AUTO_TRIM_CONFIRMATION_SECONDS = 8
+_AUTO_TRIM_CONFIRMATION_SECONDS = 90
 
 
 def normalize_vpn_username(value: object) -> str:
