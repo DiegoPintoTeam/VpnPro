@@ -1981,8 +1981,8 @@ WantedBy=multi-user.target
         now_epoch = int(now_out.strip())
 
         ok_log, log_out, _ = self._run(
-            "journalctl -u udp-custom.service -o short-unix --no-pager -n 800 2>/dev/null "
-            "| grep -F 'Client connected'"
+            "journalctl -u udp-custom.service -o short-unix --no-pager "
+            "--grep='Client connected' -n 800 2>/dev/null"
         )
         if not ok_log or not (log_out or '').strip():
             return {}
@@ -2139,8 +2139,8 @@ WantedBy=multi-user.target
                 ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
                 control_port = self._get_udp_custom_port()
                 ok_log, udp_log_out, udp_log_err = self._run(
-                    "journalctl -u udp-custom.service -o short-unix --no-pager -n 800 2>/dev/null "
-                    "| grep -F 'Client connected'"
+                    "journalctl -u udp-custom.service -o short-unix --no-pager "
+                    "--grep='Client connected' -n 800 2>/dev/null"
                 )
                 conntrack_lines: list[str] = []
                 if ok_bin and control_port:

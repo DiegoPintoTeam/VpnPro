@@ -178,6 +178,7 @@ class SSHServiceIdempotencyTestCase(unittest.TestCase):
             connections = svc._collect_udp_custom_connections()
 
         self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
+        self.assertIn("--grep='Client connected'", svc._run.call_args_list[1].args[0])
 
     def test_trim_user_sessions_keeps_newest_connection(self):
         svc = self._build_service()
