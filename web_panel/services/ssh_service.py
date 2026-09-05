@@ -35,10 +35,15 @@ _UDP_CUSTOM_RECENT_CONNECT_SECONDS = 90
 _UDP_CUSTOM_LOG_WINDOW_SECONDS = 300
 _APT_AUTOREMOVE_PURGE_CMD = 'apt-get autoremove -y --purge >/dev/null 2>&1 || true'
 _TRUNCATE_LARGE_LOGS_CMD = (
-    "for f in /var/log/auth.log /var/log/syslog; do "
+    "for f in /var/log/auth.log /var/log/syslog /var/log/kern.log /var/log/syslog.1 /var/log/auth.log.1; do "
     "  [ -f \"$f\" ] && s=$(stat -c%s \"$f\" 2>/dev/null) && "
-    "  [ \"${s:-0}\" -gt 209715200 ] && truncate -s 0 \"$f\" 2>/dev/null || true; "
+    "  [ \"${s:-0}\" -gt 104857600 ] && truncate -s 0 \"$f\" 2>/dev/null || true; "
     "done"
+)
+
+# Limpieza extra para archivos rotados gigantes que gzip no pudo comprimir a tiempo
+_DELETE_GIANT_ROTATED_LOGS_CMD = (
+    "find /var/log -xdev -type f \\( -name '*.1' -o -name '*.old' \\) -size +500M -delete 2>/dev/null || true"
 )
 
 
@@ -190,18 +195,19 @@ class SSHService:
             'apt-get clean >/dev/null 2>&1 || true; '
             'rm -rf /var/lib/apt/lists/* >/dev/null 2>&1 || true; '
             f'find /tmp /var/tmp -xdev -mindepth 1 -mtime +{tmp_days} -delete >/dev/null 2>&1 || true; '
-            "find /var/log -xdev -type f -name '*.gz' -mtime +14 -delete >/dev/null 2>&1 || true; "
+            "find /var/log -xdev -type f -name '*.gz' -mtime +7 -delete >/dev/null 2>&1 || true; "
             'find /var/crash -xdev -type f -mtime +7 -delete >/dev/null 2>&1 || true'
         )
         self._run(cleanup_cmd, timeout=180)
         self._run(_TRUNCATE_LARGE_LOGS_CMD, timeout=15)
+        self._run(_DELETE_GIANT_ROTATED_LOGS_CMD, timeout=15)
         self._run(_APT_AUTOREMOVE_PURGE_CMD, timeout=120)
 
     def _run_aggressive_disk_cleanup(self, *, journal_limit_mb: int) -> None:
         aggressive_cmd = (
             f'journalctl --vacuum-size={max(100, journal_limit_mb // 2)}M --vacuum-time=3d >/dev/null 2>&1 || true; '
             "find /var/log -xdev -type f -name '*.1' -delete >/dev/null 2>&1 || true; "
-            "find /var/log -xdev -type f -name '*.gz' -mtime +3 -delete >/dev/null 2>&1 || true; "
+            "find /var/log -xdev -type f -name '*.gz' -mtime +1 -delete >/dev/null 2>&1 || true; "
             'find /tmp /var/tmp -xdev -mindepth 1 -mtime +1 -delete >/dev/null 2>&1 || true; '
             'find /var/crash -xdev -type f -delete >/dev/null 2>&1 || true; '
             'apt-get autoclean >/dev/null 2>&1 || true; '
@@ -209,6 +215,7 @@ class SSHService:
             'docker system prune -af --volumes >/dev/null 2>&1 || true'
         )
         self._run(aggressive_cmd, timeout=240)
+        self._run(_TRUNCATE_LARGE_LOGS_CMD, timeout=15)
 
     def get_root_storage_status(self) -> tuple[bool, dict[str, Any], str]:
         """Return root filesystem usage for blocks and inodes."""
@@ -264,17 +271,19 @@ class SSHService:
             self._run('systemctl restart systemd-journald 2>/dev/null || true', timeout=15)
 
             # 2. logrotate — auth.log / syslog / kern.log más agresivo
+            # Rotar DIARIO con máximo 3 copias y comprimir de inmediato (sin delaycompress)
             logrotate_conf = (
                 '/var/log/auth.log\n'
                 '/var/log/syslog\n'
                 '/var/log/kern.log\n'
                 '{\n'
                 '    daily\n'
-                '    rotate 7\n'
+                '    rotate 3\n'
+                '    size 100M\n'
                 '    compress\n'
-                '    delaycompress\n'
                 '    missingok\n'
                 '    notifempty\n'
+                '    copytruncate\n'
                 '    sharedscripts\n'
                 '    postrotate\n'
                 '        /usr/bin/systemctl kill -s HUP rsyslog.service 2>/dev/null || true\n'
@@ -282,6 +291,16 @@ class SSHService:
                 '}\n'
             )
             self._write_remote_text_file('/etc/logrotate.d/vpnpro-syslog', logrotate_conf)
+
+            # 2b. Rate limit en rsyslog para evitar flood (60GB/día es flood)
+            rsyslog_conf = (
+                '$ModLoad imuxsock\n'
+                '$SystemLogRateLimitInterval 30\n'
+                '$SystemLogRateLimitBurst 2000\n'
+                '$RepeatedMsgReduction on\n'
+            )
+            self._write_remote_text_file('/etc/rsyslog.d/50-vpnpro-ratelimit.conf', rsyslog_conf)
+            self._run('systemctl restart rsyslog 2>/dev/null || true', timeout=15)
 
             # 3. Cron semanal: autoremove + autoclean + vacuum journald
             weekly_cron = (
