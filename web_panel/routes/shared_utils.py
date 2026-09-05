@@ -468,6 +468,7 @@ def auto_block_users_exceeding_limit(
         )
     except Exception:
         trim_confirmation_seconds = _AUTO_TRIM_CONFIRMATION_SECONDS
+    auto_block_udp_excess = bool(current_app.config.get('AUTO_BLOCK_UDP_EXCESS', False))
     for user_id, username, connection_limit, is_blocked in user_rows:
         normalized = (username or '').strip().upper()
         sessions = max(0, int(normalized_online.get(normalized, 0)))
@@ -521,9 +522,11 @@ def auto_block_users_exceeding_limit(
                 continue
 
             # UDP Custom no expone procesos individuales que se puedan cerrar.
-            # La deteccion ya descarta el flujo residual durante un handoff de
-            # red; si el exceso persiste durante dos ciclos, se bloquea la cuenta
-            # para impedir futuras autenticaciones de los equipos excedentes.
+            # El bloqueo automatico queda desactivado por defecto porque QUIC
+            # puede mantener un flujo residual al cambiar de Wi-Fi a datos.
+            if not auto_block_udp_excess:
+                continue
+
             block_user = getattr(svc, 'block_user', None)
             if block_user is None:
                 continue

@@ -125,6 +125,7 @@ class Config:
         max(90, AUTO_LIMITER_INTERVAL_SECONDS * 2),
         minimum=5,
     )
+    AUTO_BLOCK_UDP_EXCESS = _env_bool('AUTO_BLOCK_UDP_EXCESS', False)
     AUTO_TRIM_USER_COOLDOWN_SECONDS = _env_int(
         'AUTO_TRIM_USER_COOLDOWN_SECONDS',
         max(20, AUTO_LIMITER_INTERVAL_SECONDS * 2),
