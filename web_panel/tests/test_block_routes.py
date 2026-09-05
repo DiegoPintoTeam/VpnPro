@@ -1199,6 +1199,7 @@ class _FakeUdpOnlyAutoBlockSSHService:
     """Simula exceso 100% UDP Custom sin procesos sshd recortables."""
 
     trimmed_usernames = []
+    blocked_usernames = []
 
     def connect(self):
         return True, 'ok'
@@ -1209,6 +1210,10 @@ class _FakeUdpOnlyAutoBlockSSHService:
     def trim_user_sessions(self, username: str, keep_sessions: int = 1):
         _FakeUdpOnlyAutoBlockSSHService.trimmed_usernames.append((username, keep_sessions))
         return True, 0, 'Sin sesiones excedentes'
+
+    def block_user(self, username: str):
+        _FakeUdpOnlyAutoBlockSSHService.blocked_usernames.append(username)
+        return True, f"Usuario '{username}' bloqueado"
 
 
 class AutoTrimOnExcessTestCase(unittest.TestCase):
@@ -1288,8 +1293,9 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertFalse(user_db.is_blocked)
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
 
-    def test_udp_only_excess_does_not_block_account_automatically(self):
+    def test_udp_only_excess_blocks_account_after_confirmation(self):
         _FakeUdpOnlyAutoBlockSSHService.trimmed_usernames = []
+        _FakeUdpOnlyAutoBlockSSHService.blocked_usernames = []
 
         with self.app.app_context():
             user_rows = [
@@ -1311,13 +1317,14 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
 
             self.assertEqual(trimmed_1, [])
             self.assertEqual(errors_1, [])
-            self.assertEqual(trimmed_2, [])
+            self.assertEqual(trimmed_2, ['USUARIO-INSISTENTE'])
             self.assertEqual(errors_2, [])
+            self.assertEqual(_FakeUdpOnlyAutoBlockSSHService.blocked_usernames, ['USUARIO-INSISTENTE'])
             self.assertEqual(_FakeUdpOnlyAutoBlockSSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
 
             user_db = db.session.get(VpnUser, self.user_id)
             self.assertIsNotNone(user_db)
-            self.assertFalse(user_db.is_blocked)
+            self.assertTrue(user_db.is_blocked)
 
     def test_trim_when_device_count_exceeds_limit(self):
         _FakeAutoBlockSSHService.trimmed_usernames = []
