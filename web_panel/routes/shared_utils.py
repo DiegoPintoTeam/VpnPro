@@ -13,7 +13,7 @@ from threading import Lock
 
 from flask import current_app, request, jsonify, flash, redirect, url_for
 
-from models import db, Server, VpnUser
+from models import Server, VpnUser
 
 _VPN_USERNAME_DASHES_RE = re.compile(r'[\u2010\u2011\u2012\u2013\u2014\u2212]')
 VPN_USERNAME_PATTERN = re.compile(r'^[A-Z]+-[A-Z]+(?:-\d{2})?$')

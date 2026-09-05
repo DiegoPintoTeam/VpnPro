@@ -1150,73 +1150,6 @@ def _start_server_delete_background_sync(
     return sync_id
 
 
-def _build_panel_sync_preview(server: Server, remote_users: list[dict[str, object]]) -> dict[str, object]:
-    panel_users = (
-        VpnUser.query
-        .options(
-            load_only(VpnUser.id, VpnUser.username, VpnUser.is_active, VpnUser.server_id, VpnUser.reseller_id),
-            joinedload(VpnUser.reseller).load_only(Reseller.id, Reseller.server_id),
-        )
-        .join(Reseller, VpnUser.reseller_id == Reseller.id)
-        .filter(or_(VpnUser.server_id == server.id, Reseller.server_id == server.id))
-        .order_by(VpnUser.id.desc())
-        .all()
-    )
-
-    primary_by_norm: dict[str, VpnUser] = {}
-    duplicate_rows: list[VpnUser] = []
-    for panel_user in panel_users:
-        username_raw = (panel_user.username or '').strip()
-        if not username_raw:
-            continue
-        username_norm = username_raw.upper()
-        existing = primary_by_norm.get(username_norm)
-        if existing is None:
-            primary_by_norm[username_norm] = panel_user
-            continue
-        if (not existing.is_active) and panel_user.is_active:
-            duplicate_rows.append(existing)
-            primary_by_norm[username_norm] = panel_user
-            continue
-        duplicate_rows.append(panel_user)
-
-    deduped_panel = sum(1 for duplicate in duplicate_rows if duplicate.is_active)
-    active_panel_users = [u for u in primary_by_norm.values() if u.is_active]
-    active_panel_norms = {(u.username or '').strip().upper() for u in active_panel_users if (u.username or '').strip()}
-
-    remote_by_norm: dict[str, dict[str, object]] = {}
-    for remote_data in remote_users:
-        username_raw = str(remote_data.get('username') or '').strip()
-        if not username_raw:
-            continue
-        remote_by_norm[username_raw.upper()] = remote_data
-
-    to_create = 0
-    to_update = 0
-    for panel_user in active_panel_users:
-        username = (panel_user.username or '').strip().upper()
-        if not username:
-            continue
-        if username in remote_by_norm:
-            to_update += 1
-        else:
-            to_create += 1
-
-    to_delete = 0
-    for remote_norm in remote_by_norm:
-        if remote_norm not in active_panel_norms:
-            to_delete += 1
-
-    return {
-        'panel_total': len(active_panel_users),
-        'remote_total': len(remote_by_norm),
-        'to_create': to_create,
-        'to_update': to_update,
-        'to_delete': to_delete,
-        'deduped_panel': deduped_panel,
-    }
-
-
 def _background_sync_server_users(
     app,
     sync_id: str,
@@ -2187,91 +2120,6 @@ def edit_server(server_id: int):
     return redirect(url_for('admin.servers'))
 
 
-@admin_bp.route('/servers/sync-preview-all', methods=['POST'])
-@admin_required
-def sync_preview_all_servers_users():
-    servers = Server.query.filter_by(is_active=True).all()
-    servers = sorted(servers, key=_server_logical_sort_key)
-    if not servers:
-        flash('No hay servidores activos para previsualizar.', 'warning')
-        return redirect(url_for('admin.servers'))
-
-    total_panel = 0
-    total_remote = 0
-    total_create = 0
-    total_update = 0
-    total_delete = 0
-    total_deduped = 0
-    details: list[str] = []
-    errors: list[str] = []
-
-    for server in servers:
-        svc = SSHService(server)
-        ok, remote_users, err = svc.list_users_for_sync()
-        if not ok:
-            errors.append(f'{server.name}: {err}')
-            continue
-
-        stats = _build_panel_sync_preview(server, remote_users)
-        total_panel += int(stats['panel_total'])
-        total_remote += int(stats['remote_total'])
-        total_create += int(stats['to_create'])
-        total_update += int(stats['to_update'])
-        total_delete += int(stats['to_delete'])
-        total_deduped += int(stats['deduped_panel'])
-        details.append(
-            (
-                f"{server.name}: panel={stats['panel_total']}, VPS={stats['remote_total']}, "
-                f"crear={stats['to_create']}, actualizar={stats['to_update']}, "
-                f"eliminar={stats['to_delete']}, duplicados_panel={stats['deduped_panel']}"
-            )
-        )
-
-    flash(
-        (
-            f'Previsualizacion panel -> VPS: panel={total_panel}, VPS={total_remote}, '
-            f'crear={total_create}, actualizar={total_update}, eliminar={total_delete}, '
-            f'duplicados_panel={total_deduped}.'
-        ),
-        'info',
-    )
-
-    if details:
-        flash(' | '.join(details[:8]), 'info')
-    if len(details) > 8:
-        flash(f'Se omitieron {len(details) - 8} servidor(es) en el detalle por longitud.', 'secondary')
-    if errors:
-        flash('Servidores no previsualizados: ' + ' | '.join(errors[:8]), 'warning')
-
-    return redirect(url_for('admin.servers'))
-
-
-@admin_bp.route('/servers/<int:server_id>/sync-preview', methods=['POST'])
-@admin_required
-def sync_preview_server_users(server_id: int):
-    server = db.session.get(Server, server_id)
-    if not server:
-        flash('Servidor no encontrado.', 'danger')
-        return redirect(url_for('admin.servers'))
-
-    svc = SSHService(server)
-    ok, remote_users, err = svc.list_users_for_sync()
-    if not ok:
-        flash(f'No se pudo previsualizar {server.name}: {err}', 'warning')
-        return redirect(url_for('admin.servers'))
-
-    stats = _build_panel_sync_preview(server, remote_users)
-    flash(
-        (
-            f"Previsualizacion panel -> '{server.name}': panel={stats['panel_total']}, VPS={stats['remote_total']}, "
-            f"crear={stats['to_create']}, actualizar={stats['to_update']}, eliminar={stats['to_delete']}, "
-            f"duplicados_panel={stats['deduped_panel']}."
-        ),
-        'info',
-    )
-    return redirect(url_for('admin.servers'))
-
-
 @admin_bp.route('/servers/panel-timezone', methods=['POST'])
 @admin_required
 def set_panel_timezone():
@@ -2433,12 +2281,6 @@ def reconcile_resellers():
 @admin_required
 def server_delete_sync_status():
     return jsonify({'ok': True, 'items': _list_delete_sync_status()})
-
-
-@admin_bp.route('/servers/user-sync-status', methods=['GET'])
-@admin_required
-def server_user_sync_status():
-    return jsonify({'ok': True, 'items': _list_user_sync_status()})
 
 
 @admin_bp.route('/servers/<int:server_id>/test', methods=['POST'])
@@ -3345,26 +3187,6 @@ def dashboard_online_users():
     return jsonify(payload)
 
 
-@admin_bp.route('/servers/<int:server_id>/online-debug')
-@admin_required
-def server_online_debug(server_id: int):
-    server = db.session.get(Server, server_id)
-    if not server:
-        return jsonify({'ok': False, 'msg': 'Servidor no encontrado.'}), 404
-
-    svc = SSHService(server)
-    ok, data, err = svc.debug_online_sources()
-    if not ok:
-        return jsonify({'ok': False, 'msg': err, 'server_id': server_id}), 400
-
-    return jsonify({
-        'ok': True,
-        'server_id': server_id,
-        'server_name': server.name,
-        'sources': data,
-    })
-
-
 @admin_bp.route('/users/create', methods=['POST'])
 @admin_required
 def create_user():
@@ -3479,88 +3301,6 @@ def create_user():
         base_username,
     )
     return _respond_user_action('admin.users', success_msg, 'success', ok=True, user=vu)
-
-
-@admin_bp.route('/users/create-demo', methods=['POST'])
-@admin_required
-def create_demo_user():
-    limit = request.form.get('limit', 1, type=int) or 1
-    reseller_id = request.form.get('reseller_id', type=int)
-    server_id = request.form.get('server_id', type=int)
-    create_as_admin = request.form.get('create_as_admin') in {'1', 'true', 'on'}
-
-    if create_as_admin:
-        reseller_id = None
-
-    if not server_id:
-        return _respond_user_action('admin.users', 'Debes seleccionar un servidor para crear un demo.', 'danger', ok=False, status_code=400)
-
-    limit = max(1, limit)
-
-    server = db.session.get(Server, server_id)
-    if not server:
-        return _respond_user_action('admin.users', 'Servidor inválido.', 'danger', ok=False, status_code=400)
-
-    if reseller_id:
-        reseller = db.session.get(Reseller, reseller_id)
-        if not reseller or reseller.note == SYSTEM_ADMIN_RESELLER_NOTE:
-            return _respond_user_action('admin.users', 'Revendedor inválido.', 'danger', ok=False, status_code=400)
-    else:
-        reseller = _get_or_create_system_reseller(server_id)
-
-    svc = SSHService(server)
-    can_write, guard_msg = guard_server_storage_before_account_write(svc)
-    if not can_write:
-        return _respond_user_action('admin.users', guard_msg, 'danger', ok=False, status_code=400)
-
-    # Check if demo already exists for this reseller
-    existing_demo = VpnUser.query.filter_by(reseller_id=reseller.id, is_active=True).filter(
-        VpnUser.username.like('DEMO-%')
-    ).first()
-    if existing_demo:
-        return _respond_user_action(
-            'admin.users',
-            'Este revendedor ya tiene un demo activo. Solo se permite 1 demo por revendedor.',
-            'demo_limit',
-            ok=False,
-            status_code=400,
-        )
-
-    existing_usernames = load_active_usernames_upper()
-
-    created, username, password, msg = provision_demo_user(
-        svc,
-        existing_usernames,
-        limit,
-    )
-    if not created and msg:
-        return _respond_user_action('admin.users', msg_demo_create_failed(msg), 'danger', ok=False, status_code=400)
-
-    if not created:
-        return _respond_user_action('admin.users', MSG_DEMO_NAME_EXHAUSTED, 'danger', ok=False, status_code=400)
-
-    vu = VpnUser(
-        username=username,
-        password=password,
-        connection_limit=limit,
-        expiry_date=datetime.utcnow() + timedelta(hours=DEMO_MAX_HOURS),
-        reseller_id=reseller.id,
-        server_id=server_id,
-    )
-    db.session.add(vu)
-    db.session.commit()
-    db.session.refresh(vu)
-
-    sched_ok, sched_msg = svc.schedule_demo_lock(username, DEMO_MAX_HOURS)
-    owner_label = 'Admin' if reseller.note == SYSTEM_ADMIN_RESELLER_NOTE else reseller.username
-    if not sched_ok:
-        flash(msg_demo_schedule_warning(sched_msg), 'warning')
-    return _respond_admin_users_action(
-        f"Demo creado: usuario '{username}' | clave '{password}' | {DEMO_MAX_HOURS} hora(s) | propietario: {owner_label}.",
-        'success',
-        ok=True,
-        user=vu,
-    )
 
 
 @admin_bp.route('/users/<int:user_id>/delete', methods=['POST'])
@@ -3723,21 +3463,6 @@ def checkuser_clear_user(user_id: int):
         user=u,
         status_code=400,
     )
-
-
-@admin_bp.route('/users/<int:user_id>/diagnostics', methods=['GET'])
-@admin_required
-def user_diagnostics(user_id: int):
-    u = db.session.get(VpnUser, user_id)
-    if not u:
-        return jsonify({'ok': False, 'message': 'Usuario no encontrado.'}), 404
-
-    svc = SSHService(u.server)
-    ok, details = svc.inspect_user_state(u.username)
-    if not ok:
-        return jsonify({'ok': False, 'message': details.get('error', 'No se pudo diagnosticar'), 'details': details}), 400
-
-    return jsonify({'ok': True, 'user_id': int(u.id), 'username': u.username, 'details': details}), 200
 
 
 # ──────────────────────────────────────────────────────────

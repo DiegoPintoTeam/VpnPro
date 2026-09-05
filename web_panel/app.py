@@ -544,9 +544,6 @@ def create_app() -> Flask:
 
         admin_cols = db.session.execute(text("PRAGMA table_info(admins)")).fetchall()
         admin_col_names = {c[1] for c in admin_cols}
-        if 'max_connections' not in admin_col_names:
-            db.session.execute(text("ALTER TABLE admins ADD COLUMN max_connections INTEGER DEFAULT 0"))
-            db.session.commit()
 
         user_cols = db.session.execute(text("PRAGMA table_info(vpn_users)")).fetchall()
         user_col_names = {c[1] for c in user_cols}

@@ -458,67 +458,6 @@ def create_user():
     return _respond_reseller_users_action(success_msg, 'success', ok=True, user=vu)
 
 
-@reseller_bp.route('/users/create-demo', methods=['POST'])
-@reseller_required
-def create_demo_user():
-    r: Reseller = current_user
-    limit = request.form.get('limit', 1, type=int) or 1
-
-    limit = max(1, limit)
-
-    if int(limit) > r.max_connections:
-        return _respond_reseller_users_action(
-            _reseller_limit_denied_message(limit, r.max_connections, demo=True),
-            'danger',
-            ok=False,
-            status_code=400,
-        )
-
-    valid_demo, demo_msg, demo_category = _validate_demo_creation_requirements(r)
-    if not valid_demo:
-        return _respond_reseller_users_action(demo_msg, demo_category, ok=False, status_code=400)
-
-    svc = SSHService(r.server)
-    can_write, guard_msg = guard_server_storage_before_account_write(svc)
-    if not can_write:
-        return _respond_reseller_users_action(guard_msg, 'danger', ok=False, status_code=400)
-
-    existing_usernames = load_active_usernames_upper()
-
-    created, username, password, msg = provision_demo_user(
-        svc,
-        existing_usernames,
-        limit,
-    )
-    if not created and msg:
-        return _respond_reseller_users_action(msg_demo_create_failed(msg), 'danger', ok=False, status_code=400)
-
-    if not created:
-        return _respond_reseller_users_action(MSG_DEMO_NAME_EXHAUSTED, 'danger', ok=False, status_code=400)
-
-    vu = VpnUser(
-        username=username,
-        password=password,
-        connection_limit=limit,
-        expiry_date=datetime.utcnow() + timedelta(hours=DEMO_MAX_HOURS),
-        reseller_id=r.id,
-        server_id=r.server_id,
-    )
-    db.session.add(vu)
-    db.session.commit()
-    db.session.refresh(vu)
-
-    sched_ok, sched_msg = svc.schedule_demo_lock(username, DEMO_MAX_HOURS)
-    if not sched_ok:
-        flash(msg_demo_schedule_warning(sched_msg), 'warning')
-    return _respond_reseller_users_action(
-        f"Demo creado: usuario '{username}' | clave '{password}' | {DEMO_MAX_HOURS} hora(s).",
-        'success',
-        ok=True,
-        user=vu,
-    )
-
-
 # ──────────────────────────────────────────────────────────
 # Delete user
 # ──────────────────────────────────────────────────────────
@@ -745,25 +684,6 @@ def checkuser_clear_user(user_id: int):
         status_code=400,
     )
 
-
-@reseller_bp.route('/users/<int:user_id>/diagnostics', methods=['GET'])
-@reseller_required
-def user_diagnostics(user_id: int):
-    u = _get_reseller_owned_user(user_id)
-    if not u:
-        return jsonify({'ok': False, 'message': 'Usuario no encontrado.'}), 404
-
-    svc = SSHService(u.server)
-    ok, details = svc.inspect_user_state(u.username)
-    if not ok:
-        return jsonify({'ok': False, 'message': details.get('error', 'No se pudo diagnosticar'), 'details': details}), 400
-
-    return jsonify({'ok': True, 'user_id': int(u.id), 'username': u.username, 'details': details}), 200
-
-
-# ──────────────────────────────────────────────────────────
-# Online users (AJAX)
-# ──────────────────────────────────────────────────────────
 
 @reseller_bp.route('/users/online')
 @reseller_required

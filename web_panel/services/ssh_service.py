@@ -2268,59 +2268,6 @@ WantedBy=timers.target
         finally:
             self.disconnect()
 
-    def debug_online_sources(self) -> tuple[bool, dict[str, object], str]:
-        """Return raw online detection sources for troubleshooting false positives."""
-        ok, msg = self.connect()
-        if not ok:
-            return False, {}, msg
-        try:
-            ok_ss, ss_out, ss_err = self._run("ss -Htnp state established '( sport = :22 )' 2>/dev/null")
-            ok_who, who_out, who_err = self._run('who 2>/dev/null')
-            ok_ps, ps_out, ps_err = self._run("ps -eo pid=,etimes=,args= | grep 'sshd:' | grep -v grep")
-
-            payload: dict[str, object] = {
-                'ss_ok': bool(ok_ss),
-                'ss_lines': [line.strip() for line in (ss_out or '').splitlines() if (line or '').strip()],
-                'ss_err': (ss_err or '').strip(),
-                'who_ok': bool(ok_who),
-                'who_lines': [line.strip() for line in (who_out or '').splitlines() if (line or '').strip()],
-                'who_err': (who_err or '').strip(),
-                'ps_ok': bool(ok_ps),
-                'ps_lines': [line.strip() for line in (ps_out or '').splitlines() if (line or '').strip()],
-                'ps_err': (ps_err or '').strip(),
-            }
-
-            ok_udp_active, _, _ = self._run('systemctl is-active --quiet udp-custom.service')
-            if ok_udp_active:
-                ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
-                control_port = self._get_udp_custom_port()
-                ok_log, udp_log_out, udp_log_err = self._run(
-                    "journalctl -u udp-custom.service -o short-unix --no-pager "
-                    "--grep='Client connected' -n 800 2>/dev/null"
-                )
-                conntrack_lines: list[str] = []
-                if ok_bin and control_port:
-                    _, ct_out, _ = self._run(f'conntrack -L -p udp --dport {control_port} -n 2>/dev/null')
-                    conntrack_lines = [line.strip() for line in (ct_out or '').splitlines() if (line or '').strip()]
-                payload.update({
-                    'udp_custom_active': True,
-                    'udp_custom_conntrack_installed': bool(ok_bin),
-                    'udp_custom_control_port': control_port,
-                    'udp_custom_log_ok': bool(ok_log),
-                    'udp_custom_log_lines': [
-                        line.strip() for line in (udp_log_out or '').splitlines() if (line or '').strip()
-                    ],
-                    'udp_custom_log_err': (udp_log_err or '').strip(),
-                    'udp_custom_conntrack_lines': conntrack_lines,
-                    'udp_custom_computed': self._collect_udp_custom_connections(),
-                })
-            else:
-                payload['udp_custom_active'] = False
-
-            return True, payload, ''
-        finally:
-            self.disconnect()
-
     def list_users_for_sync(self) -> tuple[bool, list[dict[str, Any]], str]:
         """Read current VPS users from /root/usuarios.db for panel synchronization."""
         ok, msg = self.connect()
@@ -2762,49 +2709,6 @@ WantedBy=timers.target
                 return False, err or 'No se pudo limpiar registros de CheckUser'
             deleted = (out or '0').strip()
             return True, f"Dispositivos CheckUser eliminados para '{username}': {deleted}"
-        finally:
-            if opened_here:
-                self.disconnect()
-
-    def inspect_user_state(self, username: str) -> tuple[bool, dict[str, object]]:
-        """Collect non-destructive SSH diagnostics for a user on the VPS."""
-        if not _USERNAME_RE.match(username):
-            return False, {'error': 'Nombre de usuario inválido'}
-
-        ok, msg, opened_here = self._connect_if_needed()
-        if not ok:
-            return False, {'error': f'No se pudo conectar: {msg}'}
-
-        def _capture(cmd: str) -> dict[str, object]:
-            cmd_ok, out, err = self._run(cmd)
-            return {
-                'ok': bool(cmd_ok),
-                'stdout': out,
-                'stderr': err,
-            }
-
-        try:
-            payload: dict[str, object] = {
-                'username': username,
-                'checks': {
-                    'id': _capture(f'id {username} 2>&1'),
-                    'getent_passwd': _capture(f'getent passwd {username} 2>&1'),
-                    'passwd_status': _capture(f'passwd -S {username} 2>&1'),
-                    'usuarios_db_entry': _capture(
-                        "awk '$1==\"" + username + "\" {print $0}' /root/usuarios.db 2>&1"
-                    ),
-                    'password_file': _capture(f'ls -l /etc/VPNPro/passwords/{username} 2>&1'),
-                    'command_usermod': _capture('command -v usermod 2>&1'),
-                    'command_passwd': _capture('command -v passwd 2>&1'),
-                    'command_userdel': _capture('command -v userdel 2>&1'),
-                    'is_root': _capture('id -u 2>&1'),
-                },
-                'notes': [
-                    'Diagnostico de solo lectura: no ejecuta bloqueo ni eliminacion.',
-                    'Para errores exactos de block/delete, revisar el mensaje devuelto por la accion AJAX.',
-                ],
-            }
-            return True, payload
         finally:
             if opened_here:
                 self.disconnect()
