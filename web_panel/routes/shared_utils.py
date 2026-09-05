@@ -92,7 +92,7 @@ def get_online_check_interval_ms() -> int:
 
 def get_limiter_interval_seconds() -> int:
     """Get interval (seconds) for applying connection limits via background worker."""
-    fallback_seconds = max(2, int(current_app.config.get('AUTO_LIMITER_INTERVAL_SECONDS', 10) or 10))
+    fallback_seconds = max(2, min(60, int(current_app.config.get('AUTO_LIMITER_INTERVAL_SECONDS', 10) or 10)))
     return _get_panel_setting_int('limiter_interval_seconds', fallback_seconds, 2, 60)
 
 

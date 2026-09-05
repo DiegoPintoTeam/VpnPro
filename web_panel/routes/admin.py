@@ -79,6 +79,7 @@ from routes.shared_utils import (
     guard_server_storage_before_account_write,
     generate_demo_password,
     get_cached_online_snapshot,
+    get_limiter_interval_seconds,
     get_online_check_interval_ms,
     load_active_usernames_upper,
     normalize_vpn_username,
@@ -681,16 +682,6 @@ def _set_online_check_interval_seconds(seconds: int) -> None:
     settings = _load_settings()
     settings['online_check_interval_seconds'] = max(1, min(300, int(seconds)))
     _save_settings(settings)
-
-
-def _get_limiter_interval_seconds() -> int:
-    fallback = max(2, min(60, int(current_app.config.get('AUTO_LIMITER_INTERVAL_SECONDS', 10) or 10)))
-    value = _load_settings().get('limiter_interval_seconds', fallback)
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = fallback
-    return max(2, min(60, parsed))
 
 
 def _set_limiter_interval_seconds(seconds: int) -> None:
@@ -2152,7 +2143,7 @@ def servers():
         common_timezones=COMMON_TIMEZONES,
         panel_timezone=_get_panel_timezone(),
         online_check_interval_seconds=_get_online_check_interval_seconds(),
-        limiter_interval_seconds=_get_limiter_interval_seconds(),
+        limiter_interval_seconds=get_limiter_interval_seconds(),
     )
 
 
