@@ -2026,9 +2026,27 @@ WantedBy=multi-user.target
             # conntrack confirma "vivo ahora": la antiguedad del log usado para
             # identificar al usuario de esa IP no importa.
             live_ips: set[str] = set()
+            newest_connect_by_user = {
+                username: max(
+                    last_seen_by_ip[ip]
+                    for ip, mapped_username in user_by_ip.items()
+                    if mapped_username == username
+                )
+                for username in set(user_by_ip.values())
+            }
             for ip, _port in live_flows:
                 username = user_by_ip.get(ip)
                 if not username:
+                    continue
+                newest_connect = newest_connect_by_user[username]
+                is_network_handoff = (
+                    now_epoch - newest_connect <= _UDP_CUSTOM_RECENT_CONNECT_SECONDS
+                    and last_seen_by_ip[ip] < newest_connect
+                )
+                if is_network_handoff:
+                    # Tras pasar de Wi-Fi a datos, conntrack conserva el flujo
+                    # anterior varios minutos. Mientras la nueva autenticacion
+                    # esta reciente, ese flujo viejo no es otro dispositivo.
                     continue
                 sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
                 devices_by_user.setdefault(username, set()).add(ip)

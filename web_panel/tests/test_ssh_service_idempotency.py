@@ -194,6 +194,28 @@ class SSHServiceIdempotencyTestCase(unittest.TestCase):
 
         self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
 
+    def test_udp_custom_network_handoff_ignores_residual_old_flow(self):
+        svc = self._build_service()
+
+        with patch.object(svc, '_run', side_effect=[
+            (True, '1000\n', ''),
+            (True, (
+                '800.000 [INFO] [src:198.51.100.10:50000] [user:DIEGO-PINTO] Client connected\n'
+                '990.000 [INFO] [src:203.0.113.10:50001] [user:DIEGO-PINTO] Client connected\n'
+            ), ''),
+            (True, '36712\n', ''),
+            (True, '', ''),
+            (True, (
+                'udp 17 29 src=198.51.100.10 dst=10.0.0.1 sport=50000 dport=36712 '
+                'src=10.0.0.1 dst=198.51.100.10 sport=36712 dport=50000 [ASSURED]\n'
+                'udp 17 29 src=203.0.113.10 dst=10.0.0.1 sport=50001 dport=36712 '
+                'src=10.0.0.1 dst=203.0.113.10 sport=36712 dport=50001 [ASSURED]\n'
+            ), ''),
+        ]):
+            connections = svc._collect_udp_custom_connections()
+
+        self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
+
     def test_trim_user_sessions_keeps_newest_connection(self):
         svc = self._build_service()
 
