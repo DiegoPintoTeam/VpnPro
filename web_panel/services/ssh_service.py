@@ -1988,10 +1988,18 @@ WantedBy=multi-user.target
         result: dict[str, tuple[int, int, int]] = {}
         for username, sockets in sockets_by_user.items():
             if active_flows is not None:
-                live = {s for s in sockets if s in active_flows}
-                reference = live or sockets
+                # conntrack es la fuente de verdad del estado real: si no hay
+                # flujos vivos ahora, el usuario esta desconectado. No caer de
+                # vuelta al log (`sockets`) o un usuario ya desconectado seguiria
+                # apareciendo "en linea" hasta que expire la ventana de 300s.
+                reference = {s for s in sockets if s in active_flows}
             else:
                 reference = sockets
+
+            if not reference:
+                # Sin flujos vivos confirmados por conntrack: usuario desconectado,
+                # no reportarlo (evita quedar "en linea" con devices forzado a 1).
+                continue
 
             user_socket_ts = socket_last_ts.get(username, {})
             by_ip: dict[str, list[tuple[str, int]]] = {}
