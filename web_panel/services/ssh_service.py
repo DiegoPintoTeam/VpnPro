@@ -1950,7 +1950,7 @@ WantedBy=multi-user.target
                 continue
             ts_match = re.match(r'^(\d+)\.\d+', line)
             user_match = re.search(r'\[user:([A-Za-z0-9._-]+)\]', line)
-            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):(\d+)\]', line)
+            src_match = re.search(r'\[src:([0-9a-fA-F:.]+):\d+\]', line)
             if not ts_match or not user_match:
                 continue
             try:
