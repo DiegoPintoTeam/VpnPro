@@ -30,6 +30,7 @@ _conntrack_install_attempted_at: dict[str, float] = {}
 # QUIC puede tardar un instante en aparecer en conntrack justo despues de que
 # udp-custom autentica al cliente. Esta gracia evita un 0/1 transitorio.
 _UDP_CUSTOM_RECENT_CONNECT_SECONDS = 90
+_UDP_CUSTOM_LOG_WINDOW_SECONDS = 300
 _APT_AUTOREMOVE_PURGE_CMD = 'apt-get autoremove -y --purge >/dev/null 2>&1 || true'
 _TRUNCATE_LARGE_LOGS_CMD = (
     "for f in /var/log/auth.log /var/log/syslog; do "
@@ -1959,7 +1960,7 @@ WantedBy=multi-user.target
                 flows.append((ip, int(sport)))
         return flows
 
-    def _collect_udp_custom_connections(self, window_seconds: int = 300) -> dict[str, tuple[int, int, int]]:
+    def _collect_udp_custom_connections(self) -> dict[str, tuple[int, int, int]]:
         """Return {USERNAME_UPPER: (sessions, distinct_devices, seconds_since_last_connect)}.
 
         Misma logica que la deteccion SSH (`_collect_established_ssh_connections`):
@@ -2046,7 +2047,7 @@ WantedBy=multi-user.target
             # Sin conntrack, el log es la unica señal de online/offline: aqui
             # si aplica la ventana de recencia.
             for ip, username in user_by_ip.items():
-                if now_epoch - last_seen_by_ip.get(ip, 0) > window_seconds:
+                if now_epoch - last_seen_by_ip.get(ip, 0) > _UDP_CUSTOM_LOG_WINDOW_SECONDS:
                     continue
                 sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
                 devices_by_user.setdefault(username, set()).add(ip)
