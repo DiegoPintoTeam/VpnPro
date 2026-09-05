@@ -309,8 +309,8 @@ def _start_disk_housekeeping_worker(app: Flask) -> None:
         app.logger.info('Housekeeping de disco deshabilitado por configuracion.')
         return
 
-    interval_min = max(5, int(app.config.get('AUTO_DISK_HOUSEKEEPING_INTERVAL_MINUTES', 60) or 60))
-    trigger_percent = max(50, int(app.config.get('DISK_HOUSEKEEPING_TRIGGER_PERCENT', 92) or 92))
+    interval_min = max(5, int(app.config.get('AUTO_DISK_HOUSEKEEPING_INTERVAL_MINUTES', 15) or 15))
+    trigger_percent = max(50, int(app.config.get('DISK_HOUSEKEEPING_TRIGGER_PERCENT', 80) or 80))
     journal_max_mb = max(50, int(app.config.get('DISK_HOUSEKEEPING_JOURNAL_MAX_MB', 200) or 200))
     tmp_max_days = max(1, int(app.config.get('DISK_HOUSEKEEPING_TMP_MAX_AGE_DAYS', 3) or 3))
 
@@ -362,6 +362,7 @@ def _start_disk_housekeeping_worker(app: Flask) -> None:
                                 trigger_percent=trigger_percent,
                                 journal_max_mb=journal_max_mb,
                                 tmp_max_age_days=tmp_max_days,
+                                aggressive=True,
                             )
                             if not ok:
                                 app.logger.warning(
