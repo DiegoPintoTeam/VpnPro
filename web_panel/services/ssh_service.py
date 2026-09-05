@@ -12,6 +12,7 @@ import re
 import shlex
 import socket
 import stat
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,10 @@ import paramiko
 # Permite letras, numeros, guion, guion bajo y punto.
 _USERNAME_RE = re.compile(r'^[A-Za-z0-9._-]{1,32}$')
 _SFTP_TIMEOUT_SECONDS = 20
+# Cooldown para no reintentar `apt-get install conntrack` en cada ciclo de
+# polling online si un servidor no lo tiene (evita martillar apt/SSH).
+_CONNTRACK_INSTALL_RETRY_SECONDS = 3600
+_conntrack_install_attempted_at: dict[str, float] = {}
 _APT_AUTOREMOVE_PURGE_CMD = 'apt-get autoremove -y --purge >/dev/null 2>&1 || true'
 _TRUNCATE_LARGE_LOGS_CMD = (
     "for f in /var/log/auth.log /var/log/syslog; do "
@@ -1915,7 +1920,21 @@ WantedBy=multi-user.target
         """
         ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
         if not ok_bin:
-            return None
+            # Self-heal best-effort: si el servidor no tiene conntrack (ej. UDP
+            # Custom se activo antes de que este panel lo instalara), instalarlo
+            # sin exigir reactivar el modulo. Cooldown para no reintentar en cada
+            # ciclo de polling si la instalacion falla (sin internet, apt lock).
+            host = self._server.ip
+            last_attempt = _conntrack_install_attempted_at.get(host, 0.0)
+            if time.monotonic() - last_attempt >= _CONNTRACK_INSTALL_RETRY_SECONDS:
+                _conntrack_install_attempted_at[host] = time.monotonic()
+                self._run(
+                    'apt-get update -y >/dev/null 2>&1 && '
+                    'apt-get install -y conntrack >/dev/null 2>&1 || true'
+                )
+                ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
+            if not ok_bin:
+                return None
 
         ok, out, _ = self._run(f'conntrack -L -p udp --dport {port} -n 2>/dev/null')
         if not ok:
@@ -2111,6 +2130,34 @@ WantedBy=multi-user.target
                 'ps_lines': [line.strip() for line in (ps_out or '').splitlines() if (line or '').strip()],
                 'ps_err': (ps_err or '').strip(),
             }
+
+            ok_udp_active, _, _ = self._run('systemctl is-active --quiet udp-custom.service')
+            if ok_udp_active:
+                ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
+                control_port = self._get_udp_custom_port()
+                ok_log, udp_log_out, udp_log_err = self._run(
+                    "journalctl -u udp-custom.service -o short-unix --no-pager -n 800 2>/dev/null "
+                    "| grep -F 'Client connected'"
+                )
+                conntrack_lines: list[str] = []
+                if ok_bin and control_port:
+                    _, ct_out, _ = self._run(f'conntrack -L -p udp --dport {control_port} -n 2>/dev/null')
+                    conntrack_lines = [line.strip() for line in (ct_out or '').splitlines() if (line or '').strip()]
+                payload.update({
+                    'udp_custom_active': True,
+                    'udp_custom_conntrack_installed': bool(ok_bin),
+                    'udp_custom_control_port': control_port,
+                    'udp_custom_log_ok': bool(ok_log),
+                    'udp_custom_log_lines': [
+                        line.strip() for line in (udp_log_out or '').splitlines() if (line or '').strip()
+                    ],
+                    'udp_custom_log_err': (udp_log_err or '').strip(),
+                    'udp_custom_conntrack_lines': conntrack_lines,
+                    'udp_custom_computed': self._collect_udp_custom_connections(),
+                })
+            else:
+                payload['udp_custom_active'] = False
+
             return True, payload, ''
         finally:
             self.disconnect()
