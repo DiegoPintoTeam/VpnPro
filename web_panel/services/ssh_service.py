@@ -1530,6 +1530,24 @@ WantedBy=multi-user.target
                 '(apt-get update -y >/dev/null 2>&1 && apt-get install -y conntrack >/dev/null 2>&1) || true'
             )
 
+            # Best-effort: los buffers grandes de config.json (stream_buffer/receive_buffer)
+            # quedan silenciosamente truncados por el kernel si net.core.rmem_max/wmem_max
+            # son mas chicos (default Ubuntu ~208KB), limitando el throughput real de UDP
+            # Custom. Se sube el techo del kernel para que esos buffers sean efectivos.
+            sysctl_conf = (
+                'net.core.rmem_max = 268435456\n'
+                'net.core.wmem_max = 268435456\n'
+                'net.core.rmem_default = 33554432\n'
+                'net.core.wmem_default = 33554432\n'
+                'net.core.netdev_max_backlog = 250000\n'
+                'net.ipv4.udp_mem = 1000000 2000000 4000000\n'
+                'net.ipv4.udp_rmem_min = 16384\n'
+                'net.ipv4.udp_wmem_min = 16384\n'
+            )
+            self._run('mkdir -p /etc/sysctl.d')
+            self._sftp_write('/etc/sysctl.d/98-vpnpro-udpcustom.conf', sysctl_conf)
+            self._run('sysctl -p /etc/sysctl.d/98-vpnpro-udpcustom.conf >/dev/null 2>&1 || true')
+
             bin_url = 'https://raw.githubusercontent.com/http-custom/udp-custom/main/bin/udp-custom-linux-amd64'
             download_cmd = (
                 'mkdir -p /root/udp && '
@@ -1562,8 +1580,8 @@ WantedBy=multi-user.target
             config = (
                 '{\n'
                 f'  "listen": ":{port}",\n'
-                '  "stream_buffer": 33554432,\n'
-                '  "receive_buffer": 83886080,\n'
+                '  "stream_buffer": 67108864,\n'
+                '  "receive_buffer": 134217728,\n'
                 '  "auth": {\n'
                 '    "mode": "passwords"\n'
                 '  }\n'
