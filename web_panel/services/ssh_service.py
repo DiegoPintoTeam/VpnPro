@@ -27,6 +27,8 @@ _SFTP_TIMEOUT_SECONDS = 20
 # polling online si un servidor no lo tiene (evita martillar apt/SSH).
 _CONNTRACK_INSTALL_RETRY_SECONDS = 3600
 _conntrack_install_attempted_at: dict[str, float] = {}
+_EXPIRY_ENFORCER_INSTALL_RETRY_SECONDS = 300
+_expiry_enforcer_install_attempted_at: dict[str, float] = {}
 # QUIC puede tardar un instante en aparecer en conntrack justo despues de que
 # udp-custom autentica al cliente. Esta gracia evita un 0/1 transitorio.
 _UDP_CUSTOM_RECENT_CONNECT_SECONDS = 90
@@ -1504,11 +1506,18 @@ WantedBy=multi-user.target
 
     def _ensure_expiry_enforcer(self) -> tuple[bool, str]:
         """Install the VPS-local job that locks expired VPN accounts every minute."""
+        server_key = str(getattr(self._server, 'ip', '') or '')
+        now = time.monotonic()
+        last_attempt = _expiry_enforcer_install_attempted_at.get(server_key, 0.0)
+        if now - last_attempt < _EXPIRY_ENFORCER_INSTALL_RETRY_SECONDS:
+            return True, ''
+
         installed, _, _ = self._run(
             'test -x /usr/local/lib/vpnpro-expiry-enforcer && '
             'systemctl is-enabled --quiet vpnpro-expiry-enforcer.timer'
         )
         if installed:
+            _expiry_enforcer_install_attempted_at.pop(server_key, None)
             return True, ''
 
         script = '''#!/bin/sh
@@ -1562,9 +1571,11 @@ WantedBy=timers.target
         )
         ok, _, err = self._run(install_command, timeout=30)
         if not ok:
+            _expiry_enforcer_install_attempted_at[server_key] = now
             if _is_disk_full_error(err):
                 return False, _format_disk_full_message(err)
             return False, err or 'No se pudo activar el control de caducidad'
+        _expiry_enforcer_install_attempted_at.pop(server_key, None)
         return True, ''
 
     def unblock_if_expiry_locked(self, username: str) -> tuple[bool, str]:
@@ -2190,9 +2201,10 @@ WantedBy=timers.target
         if not ok:
             return False, {}, {}, {}, msg
         try:
-            expiry_ok, expiry_msg = self._ensure_expiry_enforcer()
-            if not expiry_ok:
-                return False, {}, {}, {}, expiry_msg
+            # El control de caducidad es auxiliar al monitoreo. Si no hay espacio para
+            # instalarlo todavía, el housekeeping podrá liberarlo sin detener el
+            # conteo ni la aplicación de límites de sesiones.
+            self._ensure_expiry_enforcer()
 
             sessions_by_user: dict[str, int] = {}
             devices_by_user: dict[str, int] = {}
