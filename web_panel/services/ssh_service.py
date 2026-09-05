@@ -1984,24 +1984,34 @@ WantedBy=multi-user.target
         # realmente simultaneos (dentro de la ventana de solape abajo); si no, se
         # asume remanente de migracion y se conserva solo el socket mas reciente.
         _SAME_IP_OVERLAP_SECONDS = 25
+        # Un connect recien logueado se da por online de inmediato aunque
+        # conntrack todavia no vea el flujo (race de timing/matching por
+        # direccion de NAT); mas alla de esta ventana, conntrack manda.
+        _RECENT_CONNECT_SECONDS = 60
 
         result: dict[str, tuple[int, int, int]] = {}
         for username, sockets in sockets_by_user.items():
+            user_socket_ts = socket_last_ts.get(username, {})
             if active_flows is not None:
-                # conntrack es la fuente de verdad del estado real: si no hay
-                # flujos vivos ahora, el usuario esta desconectado. No caer de
-                # vuelta al log (`sockets`) o un usuario ya desconectado seguiria
-                # apareciendo "en linea" hasta que expire la ventana de 300s.
-                reference = {s for s in sockets if s in active_flows}
+                recent = {
+                    s for s in sockets
+                    if now_epoch - user_socket_ts.get(s, 0) <= _RECENT_CONNECT_SECONDS
+                }
+                alive = {s for s in sockets if s in active_flows}
+                # conntrack manda para sesiones ya establecidas (mas de
+                # _RECENT_CONNECT_SECONDS desde el ultimo connect logueado); un
+                # connect fresco cuenta online sin esperar confirmacion de
+                # conntrack.
+                reference = recent | alive
             else:
                 reference = sockets
 
             if not reference:
-                # Sin flujos vivos confirmados por conntrack: usuario desconectado,
-                # no reportarlo (evita quedar "en linea" con devices forzado a 1).
+                # Sin flujos vivos confirmados y sin connect reciente: usuario
+                # desconectado, no reportarlo (evita quedar "en linea" con
+                # devices forzado a 1).
                 continue
 
-            user_socket_ts = socket_last_ts.get(username, {})
             by_ip: dict[str, list[tuple[str, int]]] = {}
             for ip, port in reference:
                 by_ip.setdefault(ip, []).append((ip, port))
