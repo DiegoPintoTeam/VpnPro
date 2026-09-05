@@ -1946,6 +1946,7 @@ WantedBy=multi-user.target
 
         sockets_by_user: dict[str, set[tuple[str, int]]] = {}
         last_seen_by_user: dict[str, int] = {}
+        socket_last_ts: dict[str, dict[tuple[str, int], int]] = {}
         for raw_line in (log_out or '').splitlines():
             line = (raw_line or '').strip()
             if not line:
@@ -1966,11 +1967,23 @@ WantedBy=multi-user.target
                 continue
             ip = src_match.group(1).strip() if src_match else 'UNKNOWN'
             port = int(src_match.group(2)) if src_match else 0
-            sockets_by_user.setdefault(username, set()).add((ip, port))
+            socket_key = (ip, port)
+            sockets_by_user.setdefault(username, set()).add(socket_key)
             last_seen_by_user[username] = max(last_seen_by_user.get(username, 0), ts)
+            user_socket_ts = socket_last_ts.setdefault(username, {})
+            user_socket_ts[socket_key] = max(user_socket_ts.get(socket_key, 0), ts)
 
         control_port = self._get_udp_custom_port()
         active_flows = self._collect_udp_custom_active_flows(control_port) if control_port else None
+
+        # Un dispositivo que migra de puerto (QUIC) deja su flujo anterior vivo en
+        # conntrack por varios minutos (timeout ASSURED) aunque ya no lo use; eso
+        # infla "sessions" mostrando 2/1 para un solo dispositivo real. Para
+        # distinguirlo de 2 dispositivos reales tras el mismo NAT, solo se cuenta
+        # mas de un socket por IP si sus ultimos eventos "Client connected" son
+        # realmente simultaneos (dentro de la ventana de solape abajo); si no, se
+        # asume remanente de migracion y se conserva solo el socket mas reciente.
+        _SAME_IP_OVERLAP_SECONDS = 25
 
         result: dict[str, tuple[int, int, int]] = {}
         for username, sockets in sockets_by_user.items():
@@ -1979,6 +1992,23 @@ WantedBy=multi-user.target
                 reference = live or sockets
             else:
                 reference = sockets
+
+            user_socket_ts = socket_last_ts.get(username, {})
+            by_ip: dict[str, list[tuple[str, int]]] = {}
+            for ip, port in reference:
+                by_ip.setdefault(ip, []).append((ip, port))
+
+            deduped: set[tuple[str, int]] = set()
+            for ip, socks in by_ip.items():
+                socks.sort(key=lambda s: user_socket_ts.get(s, 0), reverse=True)
+                newest = socks[0]
+                deduped.add(newest)
+                newest_ts = user_socket_ts.get(newest, 0)
+                for other in socks[1:]:
+                    if newest_ts - user_socket_ts.get(other, 0) <= _SAME_IP_OVERLAP_SECONDS:
+                        deduped.add(other)
+            reference = deduped
+
             devices = max(1, len({ip for ip, _port in reference}))
             sessions = len(reference) if active_flows is not None else devices
             age = max(0, now_epoch - last_seen_by_user.get(username, now_epoch))
