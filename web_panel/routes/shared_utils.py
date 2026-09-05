@@ -453,7 +453,7 @@ def auto_block_users_exceeding_limit(
         for username, devices in (device_online_map or {}).items()
     }
 
-    to_enforce: list[tuple[int, str, int, bool]] = []
+    to_enforce: list[tuple[str, int, bool]] = []
     try:
         trim_cooldown_seconds = max(
             1,
@@ -468,7 +468,7 @@ def auto_block_users_exceeding_limit(
         )
     except Exception:
         trim_confirmation_seconds = _AUTO_TRIM_CONFIRMATION_SECONDS
-    for user_id, username, connection_limit, is_blocked in user_rows:
+    for _user_id, username, connection_limit, is_blocked in user_rows:
         normalized = (username or '').strip().upper()
         sessions = max(0, int(normalized_online.get(normalized, 0)))
         devices = max(0, int(normalized_devices.get(normalized, 0)))
@@ -489,7 +489,7 @@ def auto_block_users_exceeding_limit(
             if cache_get(confirmation_key) is None:
                 cache_set(confirmation_key, trim_confirmation_seconds, True)
                 continue
-            to_enforce.append((user_id, username, limit, bool(is_blocked)))
+            to_enforce.append((username, limit, bool(is_blocked)))
 
     if not to_enforce:
         return [], []
@@ -502,7 +502,7 @@ def auto_block_users_exceeding_limit(
         return [], [f'No se pudo abrir conexion SSH para control de sesiones: {msg}']
 
     try:
-        for user_id, username, limit, was_blocked in to_enforce:
+        for username, limit, was_blocked in to_enforce:
             if was_blocked:
                 continue
 
