@@ -468,8 +468,6 @@ def auto_block_users_exceeding_limit(
         )
     except Exception:
         trim_confirmation_seconds = _AUTO_TRIM_CONFIRMATION_SECONDS
-    first_strike_limit_one = bool(current_app.config.get('AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE', True))
-
     for user_id, username, connection_limit, is_blocked in user_rows:
         normalized = (username or '').strip().upper()
         sessions = max(0, int(normalized_online.get(normalized, 0)))
@@ -484,16 +482,9 @@ def auto_block_users_exceeding_limit(
         if observed > limit:
             if cache_get(f'auto-trim-cooldown:{normalized}') is not None:
                 continue
-            # Solo se confirma "otro dispositivo real" cuando hay mas peers/IPs
-            # distintos que el limite. Con el mismo NAT/IP (devices <= limit) el
-            # exceso de sesiones suele ser el MISMO dispositivo abriendo varias
-            # conexiones SSH en paralelo (comun en apps VPN multi-conexion), asi
-            # que ese caso siempre exige doble deteccion para no matar la propia
-            # sesion del usuario en un bucle conecta/desconecta.
-            distinct_device_excess = device_online_map is not None and devices > limit
-            if first_strike_limit_one and limit <= 1 and distinct_device_excess:
-                to_enforce.append((user_id, username, limit, bool(is_blocked)))
-                continue
+            # Una migracion del mismo dispositivo entre Wi-Fi y datos moviles
+            # puede dejar dos IPs/flujo visibles durante un ciclo. Exigir una
+            # segunda deteccion evita bloquear esa transicion transitoria.
             confirmation_key = f'auto-trim-confirm:{normalized}'
             if cache_get(confirmation_key) is None:
                 cache_set(confirmation_key, trim_confirmation_seconds, True)

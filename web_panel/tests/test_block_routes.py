@@ -1223,7 +1223,6 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
         self.app.config.update(
             TESTING=True,
             AUTO_SYNC_ENABLED=False,
-            AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE=False,
             SQLALCHEMY_DATABASE_URI='sqlite:///:memory:',
         )
 
@@ -1398,11 +1397,10 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertEqual(errors_2, [])
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
 
-    def test_wifi_to_mobile_limit_one_trims_immediately_with_first_strike(self):
+    def test_wifi_to_mobile_limit_one_requires_second_detection(self):
         _FakeAutoBlockSSHService.trimmed_usernames = []
 
         with self.app.app_context():
-            self.app.config['AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE'] = True
             user_rows = [
                 (self.user_id, 'DIEGO-PINTO', 1, False),
             ]
@@ -1414,18 +1412,27 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             svc = _FakeAutoBlockSSHService()
 
             with patch('routes.shared_utils.time.monotonic', return_value=2000.0):
-                trimmed, errors = auto_block_users_exceeding_limit(
+                trimmed_1, errors_1 = auto_block_users_exceeding_limit(
+                    user_rows,
+                    online_map,
+                    svc,
+                    device_online_map=device_online_map,
+                )
+            with patch('routes.shared_utils.time.monotonic', return_value=2005.0):
+                trimmed_2, errors_2 = auto_block_users_exceeding_limit(
                     user_rows,
                     online_map,
                     svc,
                     device_online_map=device_online_map,
                 )
 
-            self.assertEqual(trimmed, ['DIEGO-PINTO'])
-            self.assertEqual(errors, [])
+            self.assertEqual(trimmed_1, [])
+            self.assertEqual(errors_1, [])
+            self.assertEqual(trimmed_2, ['DIEGO-PINTO'])
+            self.assertEqual(errors_2, [])
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('DIEGO-PINTO', 1)])
 
-    def test_limit_one_same_nat_requires_second_detection_with_first_strike(self):
+    def test_limit_one_same_nat_requires_second_detection(self):
         # Mismo NAT/IP (devices=1) con sessions=2 suele ser el MISMO dispositivo
         # abriendo varias conexiones SSH en paralelo (apps VPN multi-conexion);
         # no debe recortarse en el primer ciclo para evitar matar la propia
@@ -1433,7 +1440,6 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
         _FakeAutoBlockSSHService.trimmed_usernames = []
 
         with self.app.app_context():
-            self.app.config['AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE'] = True
             user_rows = [
                 (self.user_id, 'DIEGO-PINTO', 1, False),
             ]
@@ -1463,11 +1469,10 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertEqual(errors_2, [])
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('DIEGO-PINTO', 1)])
 
-    def test_wifi_to_mobile_limit_one_requires_second_detection_when_flag_disabled(self):
+    def test_wifi_to_mobile_limit_one_requires_second_detection_after_another_transition(self):
         _FakeAutoBlockSSHService.trimmed_usernames = []
 
         with self.app.app_context():
-            self.app.config['AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE'] = False
             user_rows = [
                 (self.user_id, 'DIEGO-PINTO', 1, False),
             ]
