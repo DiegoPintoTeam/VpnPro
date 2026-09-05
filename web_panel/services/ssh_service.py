@@ -1943,9 +1943,15 @@ WantedBy=multi-user.target
         basado en IP historica ni ventanas de gracia. El log de udp-custom no
         lleva usuario en el conntrack, asi que solo se usa para correlacionar
         cada IP con el ultimo usuario autenticado desde ella (equivalente a
-        pid->usuario via `ps` en SSH). Si `conntrack` no esta disponible, se cae
-        a contar por IP distinta vista en el log dentro de la ventana (mismo
-        fallback que `who` para SSH cuando `ss` no esta disponible).
+        pid->usuario via `ps` en SSH); esa correlacion NO expira con el tiempo
+        (una sesion QUIC puede seguir viva horas sin volver a loguear "Client
+        connected", asi que exigir un log reciente para poder mapear su IP a un
+        usuario hacia que sesiones largas desaparecieran del conteo pese a que
+        conntrack las siguiera viendo vivas). Si `conntrack` no esta disponible,
+        se cae a contar por IP distinta vista en el log DENTRO de la ventana
+        (unico caso donde la antiguedad si importa, porque ahi el log es la
+        unica señal de online/offline, igual que el fallback `who` para SSH
+        cuando `ss` no esta disponible).
         """
         ok_now, now_out, _ = self._run('date +%s')
         if not ok_now or not (now_out or '').strip().isdigit():
@@ -1975,8 +1981,6 @@ WantedBy=multi-user.target
                 ts = int(ts_match.group(1))
             except ValueError:
                 continue
-            if now_epoch - ts > window_seconds:
-                continue
             username = user_match.group(1).strip().upper()
             if not username or not _USERNAME_RE.match(username):
                 continue
@@ -1993,6 +1997,8 @@ WantedBy=multi-user.target
         devices_by_user: dict[str, set[str]] = {}
 
         if live_flows is not None:
+            # conntrack confirma "vivo ahora": la antiguedad del log usado para
+            # identificar al usuario de esa IP no importa.
             for ip, _port in live_flows:
                 username = user_by_ip.get(ip)
                 if not username:
@@ -2000,7 +2006,11 @@ WantedBy=multi-user.target
                 sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
                 devices_by_user.setdefault(username, set()).add(ip)
         else:
+            # Sin conntrack, el log es la unica señal de online/offline: aqui
+            # si aplica la ventana de recencia.
             for ip, username in user_by_ip.items():
+                if now_epoch - last_seen_by_ip.get(ip, 0) > window_seconds:
+                    continue
                 sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
                 devices_by_user.setdefault(username, set()).add(ip)
 
