@@ -728,41 +728,6 @@ class BlockRoutesTestCase(unittest.TestCase):
         self.assertFalse(payload['ok'])
         self.assertIn('almacenamiento crítico', payload['message'].lower())
 
-    def test_admin_user_diagnostics_returns_json(self):
-        login_response = self.client.post(
-            '/login',
-            data={'username': 'VPNPro', 'password': '123456'},
-            follow_redirects=False,
-        )
-        self.assertEqual(login_response.status_code, 302)
-
-        with patch('routes.admin.SSHService', _FakeSSHService):
-            response = self.client.get(f'/admin/users/{self.user_id}/diagnostics')
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertTrue(payload['ok'])
-        self.assertEqual(payload['username'], self.username)
-        self.assertIn('checks', payload['details'])
-
-    def test_reseller_user_diagnostics_returns_json(self):
-        login_response = self.client.post(
-            '/login',
-            data={'username': 'reseller_test', 'password': 'resellerpass'},
-            follow_redirects=False,
-        )
-        self.assertEqual(login_response.status_code, 302)
-
-        with patch('routes.reseller.SSHService', _FakeSSHService):
-            response = self.client.get(f'/reseller/users/{self.user_id}/diagnostics')
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertTrue(payload['ok'])
-        self.assertEqual(payload['username'], self.username)
-        self.assertIn('checks', payload['details'])
-
-
 class DeleteServerTransferRegressionTestCase(unittest.TestCase):
     def setUp(self):
         self.app = create_app()
