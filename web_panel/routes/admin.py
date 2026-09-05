@@ -3626,6 +3626,10 @@ def renew_user(user_id: int):
     if not ok:
         return _respond_admin_users_action(f'Error al renovar usuario en servidor: {msg}', 'danger', ok=False, status_code=400)
 
+    ok, msg = svc.unblock_if_expiry_locked(u.username)
+    if not ok:
+        return _respond_admin_users_action(f'Error al reactivar usuario renovado: {msg}', 'danger', ok=False, status_code=400)
+
     u.expiry_date = new_expiry
 
     if credits_needed > 0 and reseller.note != SYSTEM_ADMIN_RESELLER_NOTE:

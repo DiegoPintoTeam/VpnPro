@@ -1502,6 +1502,94 @@ WantedBy=multi-user.target
             return False, err or 'No se pudo abrir el rango UDP 1-65535 en firewall'
         return True, 'Rango UDP 1-65535 abierto en firewall.'
 
+    def _ensure_expiry_enforcer(self) -> tuple[bool, str]:
+        """Install the VPS-local job that locks expired VPN accounts every minute."""
+        installed, _, _ = self._run(
+            'test -x /usr/local/lib/vpnpro-expiry-enforcer && '
+            'systemctl is-enabled --quiet vpnpro-expiry-enforcer.timer'
+        )
+        if installed:
+            return True, ''
+
+        script = '''#!/bin/sh
+set -eu
+
+marker_dir=/var/lib/vpnpro/expiry-locks
+install -d -m 700 "$marker_dir"
+today_days=$(( $(date -u +%s) / 86400 ))
+
+awk -F: '$3 >= 1000 && $7 == "/bin/false" {print $1}' /etc/passwd | while IFS= read -r username; do
+    expiry_days=$(awk -F: -v user="$username" '$1 == user {print $8}' /etc/shadow)
+    case "$expiry_days" in
+        ''|*[!0-9]*) continue ;;
+    esac
+    if [ "$expiry_days" -gt 0 ] && [ "$expiry_days" -le "$today_days" ]; then
+        usermod -L "$username" >/dev/null 2>&1 || true
+        pkill -9 -u "$username" >/dev/null 2>&1 || true
+        touch "$marker_dir/$username"
+    fi
+done
+'''
+        service = '''[Unit]
+Description=VPNPro expired account enforcer
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/vpnpro-expiry-enforcer
+'''
+        timer = '''[Unit]
+Description=Run VPNPro expired account enforcer every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+'''
+        try:
+            self._sftp_write('/usr/local/lib/vpnpro-expiry-enforcer', script)
+            self._sftp_write('/etc/systemd/system/vpnpro-expiry-enforcer.service', service)
+            self._sftp_write('/etc/systemd/system/vpnpro-expiry-enforcer.timer', timer)
+        except OSError as exc:
+            if _is_disk_full_error(str(exc)):
+                return False, _format_disk_full_message(str(exc))
+            return False, f'No se pudo instalar el control de caducidad: {exc}'
+
+        ok, _, err = self._run(
+            'chmod 700 /usr/local/lib/vpnpro-expiry-enforcer && '
+            'systemctl daemon-reload && '
+            'systemctl enable --now vpnpro-expiry-enforcer.timer && '
+            'systemctl start vpnpro-expiry-enforcer.service'
+        )
+        if not ok:
+            return False, err or 'No se pudo activar el control de caducidad'
+        return True, ''
+
+    def unblock_if_expiry_locked(self, username: str) -> tuple[bool, str]:
+        """Restore an account only when the expiry enforcer locked it."""
+        if not _USERNAME_RE.match(username):
+            return False, 'Nombre de usuario inválido'
+
+        ok, msg, opened_here = self._connect_if_needed()
+        if not ok:
+            return False, f'No se pudo conectar al servidor: {msg}'
+        try:
+            command = (
+                f'if [ -e /var/lib/vpnpro/expiry-locks/{username} ]; then '
+                f'usermod -U {username} >/dev/null 2>&1 || passwd -u {username} >/dev/null 2>&1 || exit 1; '
+                f'rm -f /var/lib/vpnpro/expiry-locks/{username}; '
+                'fi'
+            )
+            ok, _, err = self._run(command)
+            if not ok:
+                return False, err or 'No se pudo reactivar el usuario renovado'
+            return True, ''
+        finally:
+            if opened_here:
+                self.disconnect()
+
     def setup_udp_custom(self, port: int = 36712, exclude_ports: list[int] | None = None) -> tuple[bool, str]:
         """Instala UDP Custom (http-custom/udp-custom) para la app HTTP Custom.
 
@@ -1516,6 +1604,10 @@ WantedBy=multi-user.target
         if not ok:
             return False, f'No se pudo conectar: {msg}'
         try:
+            expiry_ok, expiry_msg = self._ensure_expiry_enforcer()
+            if not expiry_ok:
+                return False, expiry_msg
+
             _, arch_out, _ = self._run('uname -m')
             arch = (arch_out or '').strip().lower()
             if arch not in {'x86_64', 'amd64'}:
@@ -2098,6 +2190,10 @@ WantedBy=multi-user.target
         if not ok:
             return False, {}, {}, {}, msg
         try:
+            expiry_ok, expiry_msg = self._ensure_expiry_enforcer()
+            if not expiry_ok:
+                return False, {}, {}, {}, expiry_msg
+
             sessions_by_user: dict[str, int] = {}
             devices_by_user: dict[str, int] = {}
             connected_seconds_by_user: dict[str, int] = {}
@@ -2285,6 +2381,10 @@ WantedBy=multi-user.target
         if not ok:
             return False, f'No se pudo conectar al servidor: {msg}'
         try:
+            expiry_ok, expiry_msg = self._ensure_expiry_enforcer()
+            if not expiry_ok:
+                return False, expiry_msg
+
             # Check if user already exists on the system
             ok2, out, _ = self._run(f'id {username} 2>/dev/null && echo EXISTS || echo NEW')
             already_exists = 'EXISTS' in out

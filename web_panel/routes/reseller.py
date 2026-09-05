@@ -647,6 +647,8 @@ def change_expiry(user_id: int):
 
     ok, msg = svc.change_expiry(u.username, days_from_now)
     if ok:
+        ok, msg = svc.unblock_if_expiry_locked(u.username)
+    if ok:
         u.expiry_date = new_expiry
         if credits_needed > 0:
             r.panel_credits = max(0, (r.panel_credits or 0) - credits_needed)
