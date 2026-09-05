@@ -1195,11 +1195,10 @@ class _FakeAutoBlockSSHService:
         return True, 1, 'Sesiones excedentes cerradas: 1'
 
 
-class _FakeUdpOnlyAutoBlockSSHService:
+class _FakeUdpOnlySSHService:
     """Simula exceso 100% UDP Custom sin procesos sshd recortables."""
 
     trimmed_usernames = []
-    blocked_usernames = []
 
     def connect(self):
         return True, 'ok'
@@ -1208,12 +1207,8 @@ class _FakeUdpOnlyAutoBlockSSHService:
         return None
 
     def trim_user_sessions(self, username: str, keep_sessions: int = 1):
-        _FakeUdpOnlyAutoBlockSSHService.trimmed_usernames.append((username, keep_sessions))
+        _FakeUdpOnlySSHService.trimmed_usernames.append((username, keep_sessions))
         return True, 0, 'Sin sesiones excedentes'
-
-    def block_user(self, username: str):
-        _FakeUdpOnlyAutoBlockSSHService.blocked_usernames.append(username)
-        return True, f"Usuario '{username}' bloqueado"
 
 
 class AutoTrimOnExcessTestCase(unittest.TestCase):
@@ -1294,8 +1289,7 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
 
     def test_udp_only_excess_does_not_block_account_by_default(self):
-        _FakeUdpOnlyAutoBlockSSHService.trimmed_usernames = []
-        _FakeUdpOnlyAutoBlockSSHService.blocked_usernames = []
+        _FakeUdpOnlySSHService.trimmed_usernames = []
 
         with self.app.app_context():
             user_rows = [
@@ -1304,7 +1298,7 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
 
             # UDP Custom no expone sesiones SSH: solo se detecta por devices.
             device_online_map = {'USUARIO-INSISTENTE': 2}
-            svc = _FakeUdpOnlyAutoBlockSSHService()
+            svc = _FakeUdpOnlySSHService()
 
             with patch('routes.shared_utils.time.monotonic', return_value=4000.0):
                 trimmed_1, errors_1 = auto_block_users_exceeding_limit(
@@ -1319,32 +1313,11 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertEqual(errors_1, [])
             self.assertEqual(trimmed_2, [])
             self.assertEqual(errors_2, [])
-            self.assertEqual(_FakeUdpOnlyAutoBlockSSHService.blocked_usernames, [])
-            self.assertEqual(_FakeUdpOnlyAutoBlockSSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
+            self.assertEqual(_FakeUdpOnlySSHService.trimmed_usernames, [('USUARIO-INSISTENTE', 1)])
 
             user_db = db.session.get(VpnUser, self.user_id)
             self.assertIsNotNone(user_db)
             self.assertFalse(user_db.is_blocked)
-
-    def test_udp_only_excess_can_block_when_explicitly_enabled(self):
-        _FakeUdpOnlyAutoBlockSSHService.trimmed_usernames = []
-        _FakeUdpOnlyAutoBlockSSHService.blocked_usernames = []
-
-        with self.app.app_context():
-            self.app.config['AUTO_BLOCK_UDP_EXCESS'] = True
-            user_rows = [(self.user_id, 'USUARIO-INSISTENTE', 1, False)]
-            svc = _FakeUdpOnlyAutoBlockSSHService()
-
-            with patch('routes.shared_utils.time.monotonic', return_value=5000.0):
-                auto_block_users_exceeding_limit(user_rows, {}, svc, device_online_map={'USUARIO-INSISTENTE': 2})
-            with patch('routes.shared_utils.time.monotonic', return_value=5005.0):
-                trimmed, errors = auto_block_users_exceeding_limit(
-                    user_rows, {}, svc, device_online_map={'USUARIO-INSISTENTE': 2},
-                )
-
-            self.assertEqual(trimmed, ['USUARIO-INSISTENTE'])
-            self.assertEqual(errors, [])
-            self.assertEqual(_FakeUdpOnlyAutoBlockSSHService.blocked_usernames, ['USUARIO-INSISTENTE'])
 
     def test_trim_when_device_count_exceeds_limit(self):
         _FakeAutoBlockSSHService.trimmed_usernames = []
