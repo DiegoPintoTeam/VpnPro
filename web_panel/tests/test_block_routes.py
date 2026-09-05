@@ -1371,7 +1371,11 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('DIEGO-PINTO', 1)])
 
-    def test_limit_one_same_nat_still_trims_immediately_with_first_strike(self):
+    def test_limit_one_same_nat_requires_second_detection_with_first_strike(self):
+        # Mismo NAT/IP (devices=1) con sessions=2 suele ser el MISMO dispositivo
+        # abriendo varias conexiones SSH en paralelo (apps VPN multi-conexion);
+        # no debe recortarse en el primer ciclo para evitar matar la propia
+        # sesion del usuario en un bucle conecta/desconecta.
         _FakeAutoBlockSSHService.trimmed_usernames = []
 
         with self.app.app_context():
@@ -1385,15 +1389,24 @@ class AutoTrimOnExcessTestCase(unittest.TestCase):
             svc = _FakeAutoBlockSSHService()
 
             with patch('routes.shared_utils.time.monotonic', return_value=2100.0):
-                trimmed, errors = auto_block_users_exceeding_limit(
+                trimmed_1, errors_1 = auto_block_users_exceeding_limit(
+                    user_rows,
+                    online_map,
+                    svc,
+                    device_online_map=device_online_map,
+                )
+            with patch('routes.shared_utils.time.monotonic', return_value=2105.0):
+                trimmed_2, errors_2 = auto_block_users_exceeding_limit(
                     user_rows,
                     online_map,
                     svc,
                     device_online_map=device_online_map,
                 )
 
-            self.assertEqual(trimmed, ['DIEGO-PINTO'])
-            self.assertEqual(errors, [])
+            self.assertEqual(trimmed_1, [])
+            self.assertEqual(errors_1, [])
+            self.assertEqual(trimmed_2, ['DIEGO-PINTO'])
+            self.assertEqual(errors_2, [])
             self.assertEqual(_FakeAutoBlockSSHService.trimmed_usernames, [('DIEGO-PINTO', 1)])
 
     def test_wifi_to_mobile_limit_one_requires_second_detection_when_flag_disabled(self):

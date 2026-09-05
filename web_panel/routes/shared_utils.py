@@ -473,7 +473,14 @@ def auto_block_users_exceeding_limit(
         if observed > limit:
             if cache_get(f'auto-trim-cooldown:{normalized}') is not None:
                 continue
-            if first_strike_limit_one and limit <= 1:
+            # Solo se confirma "otro dispositivo real" cuando hay mas peers/IPs
+            # distintos que el limite. Con el mismo NAT/IP (devices <= limit) el
+            # exceso de sesiones suele ser el MISMO dispositivo abriendo varias
+            # conexiones SSH en paralelo (comun en apps VPN multi-conexion), asi
+            # que ese caso siempre exige doble deteccion para no matar la propia
+            # sesion del usuario en un bucle conecta/desconecta.
+            distinct_device_excess = device_online_map is not None and devices > limit
+            if first_strike_limit_one and limit <= 1 and distinct_device_excess:
                 to_enforce.append((username, limit, bool(is_blocked)))
                 continue
             confirmation_key = f'auto-trim-confirm:{normalized}'
