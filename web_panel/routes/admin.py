@@ -88,6 +88,7 @@ from routes.shared_utils import (
     respond_user_action,
     resolve_package,
     serialize_user_for_ui,
+    server_logical_sort_key as _server_logical_sort_key,
 )
 
 admin_bp = Blueprint('admin', __name__)
@@ -109,17 +110,6 @@ _RESTORE_GUARD_SECONDS = 180
 _SETTINGS_CACHE_KEY = 'panel-settings'
 _SETTINGS_CACHE_TTL_SECONDS = 5
 _DASHBOARD_SERVER_METRICS_TTL_SECONDS = max(30, _SERVER_INFO_TTL_SECONDS)
-_SERVER_NAME_NUMBER_RE = re.compile(r'\d+')
-
-
-def _server_logical_sort_key(server: Server) -> tuple[int, int, str, int]:
-    """Natural sort by first number in server name, then by name/id."""
-    raw_name = (server.name or '').strip()
-    lowered = raw_name.lower()
-    match = _SERVER_NAME_NUMBER_RE.search(lowered)
-    if match:
-        return 0, int(match.group(0)), lowered, int(server.id or 0)
-    return 1, 0, lowered, int(server.id or 0)
 
 
 def _serialize_user_for_ui(u: VpnUser) -> dict[str, object]:

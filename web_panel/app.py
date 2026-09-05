@@ -1,5 +1,4 @@
 import os
-import re
 import threading
 import time
 import traceback
@@ -28,17 +27,7 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-_SERVER_NAME_NUMBER_RE = re.compile(r'\d+')
-
-
-def _server_logical_sort_key(server: Server) -> tuple[int, int, str, int]:
-    """Natural sort by first number in server name, then by name/id."""
-    raw_name = (server.name or '').strip()
-    lowered = raw_name.lower()
-    match = _SERVER_NAME_NUMBER_RE.search(lowered)
-    if match:
-        return 0, int(match.group(0)), lowered, int(server.id or 0)
-    return 1, 0, lowered, int(server.id or 0)
+from routes.shared_utils import server_logical_sort_key as _server_logical_sort_key
 
 
 def _get_restore_lock(app: Flask) -> threading.Lock:

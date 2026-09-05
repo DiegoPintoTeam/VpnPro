@@ -13,11 +13,22 @@ from threading import Lock
 
 from flask import current_app, request, jsonify, flash, redirect, url_for
 
-from models import VpnUser
+from models import Server, VpnUser
 
 _VPN_USERNAME_DASHES_RE = re.compile(r'[\u2010\u2011\u2012\u2013\u2014\u2212]')
 VPN_USERNAME_PATTERN = re.compile(r'^[A-Z]+-[A-Z]+(?:-\d{2})?$')
 DEMO_MAX_HOURS = 2
+_SERVER_NAME_NUMBER_RE = re.compile(r'\d+')
+
+
+def server_logical_sort_key(server: Server) -> tuple[int, int, str, int]:
+    """Natural sort by first number in server name, then by name/id."""
+    raw_name = (server.name or '').strip()
+    lowered = raw_name.lower()
+    match = _SERVER_NAME_NUMBER_RE.search(lowered)
+    if match:
+        return 0, int(match.group(0)), lowered, int(server.id or 0)
+    return 1, 0, lowered, int(server.id or 0)
 PACKAGE_OPTIONS = {
     'demo_1h': {'label': 'Demo 2 horas', 'credits': 0},
     '1m': {'label': '1 Mes', 'days': 31, 'credits': 1},
