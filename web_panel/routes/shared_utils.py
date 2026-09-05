@@ -520,32 +520,11 @@ def auto_block_users_exceeding_limit(
                 trimmed_usernames.append(username)
                 continue
 
-            # trim_user_sessions solo mata procesos sshd; un exceso 100% UDP
-            # Custom (sin sesiones SSH) siempre devuelve killed=0 porque no hay
-            # forma de cortar una conexion UDP Custom individual (multiplexa
-            # todo sobre un unico proceso). Como fallback, se bloquea la cuenta
-            # para que el excedente no pueda reautenticar en su proxima
-            # reconexion/migracion.
-            block_user = getattr(svc, 'block_user', None)
-            if block_user is None:
-                continue
-
-            ok_block, block_msg = block_user(username)
-            if not ok_block:
-                errors.append(f"{username}: {block_msg}")
-                continue
-
-            vpn_user = db.session.get(VpnUser, user_id)
-            if vpn_user is not None:
-                vpn_user.is_blocked = True
-                db.session.commit()
-
-            cache_set(
-                f'auto-trim-cooldown:{(username or "").strip().upper()}',
-                trim_cooldown_seconds,
-                True,
-            )
-            trimmed_usernames.append(username)
+            # Un exceso sin procesos sshd que recortar es propio de UDP Custom.
+            # QUIC conserva flujos al migrar entre Wi-Fi y datos y no expone una
+            # forma segura de cerrar solo la conexion excedente; bloquear la
+            # cuenta aqui castigaria transiciones legitimas de un mismo movil.
+            # El bloqueo manual sigue disponible en el panel.
     finally:
         svc.disconnect()
 
