@@ -180,6 +180,20 @@ class SSHServiceIdempotencyTestCase(unittest.TestCase):
         self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
         self.assertIn("--grep='Client connected'", svc._run.call_args_list[1].args[0])
 
+    def test_udp_custom_recent_connection_is_online_before_conntrack_flow_appears(self):
+        svc = self._build_service()
+
+        with patch.object(svc, '_run', side_effect=[
+            (True, '1000\n', ''),
+            (True, '990.000 [INFO] [src:203.0.113.10:50000] [user:DIEGO-PINTO] Client connected\n', ''),
+            (True, '36712\n', ''),
+            (True, '', ''),
+            (True, '', ''),
+        ]):
+            connections = svc._collect_udp_custom_connections()
+
+        self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
+
     def test_trim_user_sessions_keeps_newest_connection(self):
         svc = self._build_service()
 

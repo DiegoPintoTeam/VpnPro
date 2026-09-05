@@ -27,6 +27,9 @@ _SFTP_TIMEOUT_SECONDS = 20
 # polling online si un servidor no lo tiene (evita martillar apt/SSH).
 _CONNTRACK_INSTALL_RETRY_SECONDS = 3600
 _conntrack_install_attempted_at: dict[str, float] = {}
+# QUIC puede tardar un instante en aparecer en conntrack justo despues de que
+# udp-custom autentica al cliente. Esta gracia evita un 0/1 transitorio.
+_UDP_CUSTOM_RECENT_CONNECT_SECONDS = 90
 _APT_AUTOREMOVE_PURGE_CMD = 'apt-get autoremove -y --purge >/dev/null 2>&1 || true'
 _TRUNCATE_LARGE_LOGS_CMD = (
     "for f in /var/log/auth.log /var/log/syslog; do "
@@ -2021,9 +2024,21 @@ WantedBy=multi-user.target
         if live_flows is not None:
             # conntrack confirma "vivo ahora": la antiguedad del log usado para
             # identificar al usuario de esa IP no importa.
+            live_ips: set[str] = set()
             for ip, _port in live_flows:
                 username = user_by_ip.get(ip)
                 if not username:
+                    continue
+                sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
+                devices_by_user.setdefault(username, set()).add(ip)
+                live_ips.add(ip)
+
+            # El evento de autenticacion es una senal suficiente durante un
+            # margen corto mientras conntrack crea/publica el flujo QUIC.
+            for ip, username in user_by_ip.items():
+                if ip in live_ips:
+                    continue
+                if now_epoch - last_seen_by_ip.get(ip, 0) > _UDP_CUSTOM_RECENT_CONNECT_SECONDS:
                     continue
                 sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
                 devices_by_user.setdefault(username, set()).add(ip)
