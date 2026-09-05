@@ -165,6 +165,20 @@ class SSHServiceIdempotencyTestCase(unittest.TestCase):
         self.assertEqual(devices_by_user, {'TEST-USER': 2})
         self.assertEqual(connected_seconds_by_user, {'TEST-USER': 3661})
 
+    def test_udp_custom_recent_connection_falls_back_when_conntrack_query_fails(self):
+        svc = self._build_service()
+
+        with patch.object(svc, '_run', side_effect=[
+            (True, '1000\n', ''),
+            (True, '990.000 [INFO] [src:203.0.113.10:50000] [user:DIEGO-PINTO] Client connected\n', ''),
+            (True, '36712\n', ''),
+            (True, '', ''),
+            (False, '', 'Operation not permitted'),
+        ]):
+            connections = svc._collect_udp_custom_connections()
+
+        self.assertEqual(connections, {'DIEGO-PINTO': (1, 1, 10)})
+
     def test_trim_user_sessions_keeps_newest_connection(self):
         svc = self._build_service()
 

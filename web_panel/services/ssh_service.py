@@ -1915,8 +1915,8 @@ WantedBy=multi-user.target
     def _collect_udp_custom_active_flows(self, port: int) -> list[tuple[str, int]] | None:
         """Return [(ip_origen, puerto_origen)] de flujos UDP vivos en conntrack
         hacia *port* AHORA MISMO, o None si `conntrack` no esta instalado (para
-        hacer fallback seguro). Cada flujo es una conexion real y distinta, igual
-        que `ss ... state established` para SSH.
+        hacer fallback seguro) o no puede consultarse. Cada flujo es una conexion
+        real y distinta, igual que `ss ... state established` para SSH.
         """
         ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
         if not ok_bin:
@@ -1938,7 +1938,10 @@ WantedBy=multi-user.target
 
         ok, out, _ = self._run(f'conntrack -L -p udp --dport {port} -n 2>/dev/null')
         if not ok:
-            return []
+            # Un conntrack instalado pero no consultable (permisos, modulo del
+            # kernel o error transitorio) no significa que no haya flujos.
+            # Conservar el fallback por journal evita mostrar 0/1 falsamente.
+            return None
 
         flows: list[tuple[str, int]] = []
         for raw_line in (out or '').splitlines():
