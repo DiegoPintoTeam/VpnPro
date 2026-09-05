@@ -17,9 +17,9 @@ from models import VpnUser
 
 _VPN_USERNAME_DASHES_RE = re.compile(r'[\u2010\u2011\u2012\u2013\u2014\u2212]')
 VPN_USERNAME_PATTERN = re.compile(r'^[A-Z]+-[A-Z]+(?:-\d{2})?$')
-DEMO_MAX_HOURS = 1
+DEMO_MAX_HOURS = 2
 PACKAGE_OPTIONS = {
-    'demo_1h': {'label': 'Demo 1 hora', 'credits': 0},
+    'demo_1h': {'label': 'Demo 2 horas', 'credits': 0},
     '1m': {'label': '1 Mes', 'days': 31, 'credits': 1},
     '3m': {'label': '3 Meses', 'days': 93, 'credits': 3},
     '6m': {'label': '6 Meses', 'days': 186, 'credits': 6},

@@ -71,7 +71,7 @@
             {% for code, pkg in package_options.items() %}
             <option value="{{ code }}" {{ 'selected' if code == 'demo_1h' else '' }}>
               {% if code == 'demo_1h' %}
-              Demo 1 hora (mínimo 5 créditos disponibles)
+              Demo 2 horas (mínimo 5 créditos disponibles)
               {% else %}
               {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
               {% endif %}

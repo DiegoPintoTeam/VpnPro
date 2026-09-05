@@ -3624,7 +3624,7 @@ def renew_user(user_id: int):
 
     package_code = request.form.get('package', '1m')
     if package_code == 'demo_1h':
-        return _respond_admin_users_action('No se permite renovar con paquete Demo 1 hora.', 'danger', ok=False, status_code=400)
+        return _respond_admin_users_action('No se permite renovar con paquete Demo 2 horas.', 'danger', ok=False, status_code=400)
 
     package = resolve_package(package_code)
     credits_needed = package.get('credits', 0)

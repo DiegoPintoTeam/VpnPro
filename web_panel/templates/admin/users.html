@@ -81,7 +81,7 @@
             {% for code, pkg in package_options.items() %}
             <option value="{{ code }}" {{ 'selected' if code == 'demo_1h' else '' }}>
               {% if code == 'demo_1h' %}
-              Demo 1 hora (0 créditos)
+              Demo 2 horas (0 créditos)
               {% else %}
               {{ pkg.label }} ({{ pkg.credits }} crédito{{ 's' if pkg.credits != 1 else '' }})
               {% endif %}
