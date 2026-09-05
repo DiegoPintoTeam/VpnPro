@@ -1548,22 +1548,22 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 '''
-        try:
-            self._sftp_write('/usr/local/lib/vpnpro-expiry-enforcer', script)
-            self._sftp_write('/etc/systemd/system/vpnpro-expiry-enforcer.service', service)
-            self._sftp_write('/etc/systemd/system/vpnpro-expiry-enforcer.timer', timer)
-        except OSError as exc:
-            if _is_disk_full_error(str(exc)):
-                return False, _format_disk_full_message(str(exc))
-            return False, f'No se pudo instalar el control de caducidad: {exc}'
-
-        ok, _, err = self._run(
+        install_command = (
+            'install -d -m 755 /usr/local/lib /etc/systemd/system && '
+            f'printf %s {shlex.quote(script)} > /usr/local/lib/vpnpro-expiry-enforcer && '
+            f'printf %s {shlex.quote(service)} > /etc/systemd/system/vpnpro-expiry-enforcer.service && '
+            f'printf %s {shlex.quote(timer)} > /etc/systemd/system/vpnpro-expiry-enforcer.timer && '
             'chmod 700 /usr/local/lib/vpnpro-expiry-enforcer && '
+            'chmod 644 /etc/systemd/system/vpnpro-expiry-enforcer.service '
+            '/etc/systemd/system/vpnpro-expiry-enforcer.timer && '
             'systemctl daemon-reload && '
             'systemctl enable --now vpnpro-expiry-enforcer.timer && '
             'systemctl start vpnpro-expiry-enforcer.service'
         )
+        ok, _, err = self._run(install_command, timeout=30)
         if not ok:
+            if _is_disk_full_error(err):
+                return False, _format_disk_full_message(err)
             return False, err or 'No se pudo activar el control de caducidad'
         return True, ''
 

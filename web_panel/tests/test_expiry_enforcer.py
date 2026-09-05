@@ -16,7 +16,7 @@ class ExpiryEnforcerTestCase(unittest.TestCase):
         server = SimpleNamespace(ip='127.0.0.1', port=22, ssh_user='root', get_ssh_password=lambda: 'rootpass')
         service = SSHService(server)
 
-        with patch.object(service, '_sftp_write') as write, patch.object(service, '_run', side_effect=[
+        with patch.object(service, '_run', side_effect=[
             (False, '', ''),
             (True, '', ''),
         ]) as run:
@@ -24,9 +24,10 @@ class ExpiryEnforcerTestCase(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertEqual(message, '')
-        self.assertIn('OnUnitActiveSec=1min', write.call_args_list[2].args[1])
-        self.assertIn('usermod -L', write.call_args_list[0].args[1])
-        self.assertIn('vpnpro-expiry-enforcer.timer', run.call_args.args[0])
+        install_command = run.call_args.args[0]
+        self.assertIn('OnUnitActiveSec=1min', install_command)
+        self.assertIn('usermod -L', install_command)
+        self.assertIn('vpnpro-expiry-enforcer.timer', install_command)
 
     def test_renewal_only_unlocks_an_expiry_marker(self):
         server = SimpleNamespace(ip='127.0.0.1', port=22, ssh_user='root', get_ssh_password=lambda: 'rootpass')
