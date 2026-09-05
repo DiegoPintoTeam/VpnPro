@@ -2201,11 +2201,6 @@ WantedBy=timers.target
         if not ok:
             return False, {}, {}, {}, msg
         try:
-            # El control de caducidad es auxiliar al monitoreo. Si no hay espacio para
-            # instalarlo todavía, el housekeeping podrá liberarlo sin detener el
-            # conteo ni la aplicación de límites de sesiones.
-            self._ensure_expiry_enforcer()
-
             sessions_by_user: dict[str, int] = {}
             devices_by_user: dict[str, int] = {}
             connected_seconds_by_user: dict[str, int] = {}

@@ -154,7 +154,6 @@ class SSHServiceIdempotencyTestCase(unittest.TestCase):
         with patch.object(svc, 'connect', return_value=(True, 'ok')), \
              patch.object(svc, 'disconnect', return_value=None), \
              patch.object(svc, '_run', side_effect=[
-                (True, '', ''),
                  (True, 'ESTAB 0 0 10.0.0.1:22 1.1.1.1:50000 users:(("sshd",pid=101,fd=4))\nESTAB 0 0 10.0.0.1:22 2.2.2.2:50001 users:(("sshd",pid=102,fd=4))', ''),
                  (True, '101 3661 sshd: TEST-USER@pts/0\n102 120 sshd: TEST-USER@pts/1', ''),
              ]):

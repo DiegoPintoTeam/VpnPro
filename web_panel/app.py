@@ -375,6 +375,15 @@ def _start_disk_housekeeping_worker(app: Flask) -> None:
                             if not report.get('ran'):
                                 continue
 
+                            expiry_ok, expiry_err = svc._ensure_expiry_enforcer()
+                            if not expiry_ok:
+                                app.logger.warning(
+                                    'Control de caducidad pendiente en %s (%s): %s',
+                                    server.name,
+                                    server.id,
+                                    expiry_err,
+                                )
+
                             before = report.get('before') if isinstance(report.get('before'), dict) else {}
                             after = report.get('after') if isinstance(report.get('after'), dict) else {}
                             app.logger.info(
