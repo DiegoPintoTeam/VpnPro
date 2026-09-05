@@ -13,7 +13,7 @@ from threading import Lock
 
 from flask import current_app, request, jsonify, flash, redirect, url_for
 
-from models import Server, VpnUser
+from models import db, Server, VpnUser
 
 _VPN_USERNAME_DASHES_RE = re.compile(r'[\u2010\u2011\u2012\u2013\u2014\u2212]')
 VPN_USERNAME_PATTERN = re.compile(r'^[A-Z]+-[A-Z]+(?:-\d{2})?$')
@@ -453,7 +453,7 @@ def auto_block_users_exceeding_limit(
         for username, devices in (device_online_map or {}).items()
     }
 
-    to_enforce: list[tuple[str, int, bool]] = []
+    to_enforce: list[tuple[int, str, int, bool]] = []
     try:
         trim_cooldown_seconds = max(
             1,
@@ -470,7 +470,7 @@ def auto_block_users_exceeding_limit(
         trim_confirmation_seconds = _AUTO_TRIM_CONFIRMATION_SECONDS
     first_strike_limit_one = bool(current_app.config.get('AUTO_TRIM_FIRST_STRIKE_LIMIT_ONE', True))
 
-    for _user_id, username, connection_limit, is_blocked in user_rows:
+    for user_id, username, connection_limit, is_blocked in user_rows:
         normalized = (username or '').strip().upper()
         sessions = max(0, int(normalized_online.get(normalized, 0)))
         devices = max(0, int(normalized_devices.get(normalized, 0)))
@@ -492,13 +492,13 @@ def auto_block_users_exceeding_limit(
             # sesion del usuario en un bucle conecta/desconecta.
             distinct_device_excess = device_online_map is not None and devices > limit
             if first_strike_limit_one and limit <= 1 and distinct_device_excess:
-                to_enforce.append((username, limit, bool(is_blocked)))
+                to_enforce.append((user_id, username, limit, bool(is_blocked)))
                 continue
             confirmation_key = f'auto-trim-confirm:{normalized}'
             if cache_get(confirmation_key) is None:
                 cache_set(confirmation_key, trim_confirmation_seconds, True)
                 continue
-            to_enforce.append((username, limit, bool(is_blocked)))
+            to_enforce.append((user_id, username, limit, bool(is_blocked)))
 
     if not to_enforce:
         return [], []
@@ -511,22 +511,50 @@ def auto_block_users_exceeding_limit(
         return [], [f'No se pudo abrir conexion SSH para control de sesiones: {msg}']
 
     try:
-        for username, limit, was_blocked in to_enforce:
+        for user_id, username, limit, was_blocked in to_enforce:
             if was_blocked:
                 continue
 
             ok_trim, killed_sessions, trim_msg = svc.trim_user_sessions(username, keep_sessions=limit)
-            if ok_trim:
-                if killed_sessions > 0:
-                    cache_set(
-                        f'auto-trim-cooldown:{(username or "").strip().upper()}',
-                        trim_cooldown_seconds,
-                        True,
-                    )
-                    trimmed_usernames.append(username)
+            if not ok_trim:
+                errors.append(f"{username}: {trim_msg}")
                 continue
 
-            errors.append(f"{username}: {trim_msg}")
+            if killed_sessions > 0:
+                cache_set(
+                    f'auto-trim-cooldown:{(username or "").strip().upper()}',
+                    trim_cooldown_seconds,
+                    True,
+                )
+                trimmed_usernames.append(username)
+                continue
+
+            # trim_user_sessions solo mata procesos sshd; un exceso 100% UDP
+            # Custom (sin sesiones SSH) siempre devuelve killed=0 porque no hay
+            # forma de cortar una conexion UDP Custom individual (multiplexa
+            # todo sobre un unico proceso). Como fallback, se bloquea la cuenta
+            # para que el excedente no pueda reautenticar en su proxima
+            # reconexion/migracion.
+            block_user = getattr(svc, 'block_user', None)
+            if block_user is None:
+                continue
+
+            ok_block, block_msg = block_user(username)
+            if not ok_block:
+                errors.append(f"{username}: {block_msg}")
+                continue
+
+            vpn_user = db.session.get(VpnUser, user_id)
+            if vpn_user is not None:
+                vpn_user.is_blocked = True
+                db.session.commit()
+
+            cache_set(
+                f'auto-trim-cooldown:{(username or "").strip().upper()}',
+                trim_cooldown_seconds,
+                True,
+            )
+            trimmed_usernames.append(username)
     finally:
         svc.disconnect()
 
