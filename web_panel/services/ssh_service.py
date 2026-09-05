@@ -1889,16 +1889,11 @@ WantedBy=multi-user.target
         value = (out or '').strip()
         return int(value) if value.isdigit() else None
 
-    def _collect_udp_custom_active_flows(self, port: int) -> set[str] | None:
-        """Return {ip_origen} con flujos UDP vivos en conntrack hacia *port*, o
-        None si `conntrack` no esta instalado (para hacer fallback seguro).
-
-        Se correlaciona solo por IP (no por puerto): QUIC puede rebindear a un
-        puerto nuevo sin generar un log "Client connected" nuevo, asi que exigir
-        que el puerto siga siendo el mismo que el del log hacia que el flujo
-        real dejara de detectarse (falso "0/1") apenas el cliente migraba de
-        puerto. A diferencia del log, conntrack refleja el estado REAL del
-        kernel: una IP deja de aparecer en cuanto expira su timeout sin trafico.
+    def _collect_udp_custom_active_flows(self, port: int) -> list[tuple[str, int]] | None:
+        """Return [(ip_origen, puerto_origen)] de flujos UDP vivos en conntrack
+        hacia *port* AHORA MISMO, o None si `conntrack` no esta instalado (para
+        hacer fallback seguro). Cada flujo es una conexion real y distinta, igual
+        que `ss ... state established` para SSH.
         """
         ok_bin, _, _ = self._run('command -v conntrack >/dev/null 2>&1')
         if not ok_bin:
@@ -1906,9 +1901,9 @@ WantedBy=multi-user.target
 
         ok, out, _ = self._run(f'conntrack -L -p udp --dport {port} -n 2>/dev/null')
         if not ok:
-            return set()
+            return []
 
-        flows: set[str] = set()
+        flows: list[tuple[str, int]] = []
         for raw_line in (out or '').splitlines():
             pairs = re.findall(
                 r'src=([0-9a-fA-F:.]+)\s+dst=[0-9a-fA-F:.]+\s+sport=(\d+)\s+dport=(\d+)',
@@ -1916,26 +1911,23 @@ WantedBy=multi-user.target
             )
             if not pairs:
                 continue
-            ip, _sport, dport = pairs[0]
+            ip, sport, dport = pairs[0]
             if int(dport) == port:
-                flows.add(ip)
+                flows.append((ip, int(sport)))
         return flows
 
     def _collect_udp_custom_connections(self, window_seconds: int = 300) -> dict[str, tuple[int, int, int]]:
         """Return {USERNAME_UPPER: (sessions, distinct_devices, seconds_since_last_connect)}.
 
-        udp-custom (basado en QUIC) reconecta/migra de puerto cada 1-5 min aunque sea
-        el MISMO dispositivo, y su log de desconexion no incluye usuario, asi que no
-        se puede correlacionar sesion exacta solo con el log. La deteccion de
-        online/offline se hace por IP origen (no por puerto, que puede cambiar sin
-        aviso): se cruza con `conntrack` (flujos UDP vivos en el kernel, ver
-        `_collect_udp_custom_active_flows`) para confirmar si la IP sigue activa
-        AHORA. Si `conntrack` no esta disponible, se hace fallback a confiar en el
-        log dentro de la ventana.
-
-        Limitacion aceptada: 2 dispositivos reales tras el mismo NAT (misma IP
-        publica) se cuentan como 1 solo, ya que distinguirlos por puerto resulto
-        muy fragil frente al rebind de puerto de QUIC (causaba falsos 2/1 y 0/1).
+        Misma logica que la deteccion SSH (`_collect_established_ssh_connections`):
+        se cuentan conexiones REALMENTE vivas ahora (flujos UDP en `conntrack`,
+        equivalente a los sockets `ESTABLISHED` de `ss`), sin bloqueo/presencia
+        basado en IP historica ni ventanas de gracia. El log de udp-custom no
+        lleva usuario en el conntrack, asi que solo se usa para correlacionar
+        cada IP con el ultimo usuario autenticado desde ella (equivalente a
+        pid->usuario via `ps` en SSH). Si `conntrack` no esta disponible, se cae
+        a contar por IP distinta vista en el log dentro de la ventana (mismo
+        fallback que `who` para SSH cuando `ss` no esta disponible).
         """
         ok_now, now_out, _ = self._run('date +%s')
         if not ok_now or not (now_out or '').strip().isdigit():
@@ -1949,7 +1941,9 @@ WantedBy=multi-user.target
         if not ok_log or not (log_out or '').strip():
             return {}
 
-        ips_by_user: dict[str, dict[str, int]] = {}
+        user_by_ip: dict[str, str] = {}
+        last_seen_by_ip: dict[str, int] = {}
+        last_seen_by_user: dict[str, int] = {}
         for raw_line in (log_out or '').splitlines():
             line = (raw_line or '').strip()
             if not line:
@@ -1969,37 +1963,33 @@ WantedBy=multi-user.target
             if not username or not _USERNAME_RE.match(username):
                 continue
             ip = src_match.group(1).strip() if src_match else 'UNKNOWN'
-            user_ips = ips_by_user.setdefault(username, {})
-            user_ips[ip] = max(user_ips.get(ip, 0), ts)
+            if ts >= last_seen_by_ip.get(ip, 0):
+                last_seen_by_ip[ip] = ts
+                user_by_ip[ip] = username
+            last_seen_by_user[username] = max(last_seen_by_user.get(username, 0), ts)
 
         control_port = self._get_udp_custom_port()
-        live_ips = self._collect_udp_custom_active_flows(control_port) if control_port else None
+        live_flows = self._collect_udp_custom_active_flows(control_port) if control_port else None
 
-        # Un connect recien logueado se da por online de inmediato aunque
-        # conntrack todavia no vea el flujo (race de timing); mas alla de esta
-        # ventana, manda la confirmacion de conntrack.
-        _RECENT_CONNECT_SECONDS = 60
+        sessions_by_user: dict[str, int] = {}
+        devices_by_user: dict[str, set[str]] = {}
+
+        if live_flows is not None:
+            for ip, _port in live_flows:
+                username = user_by_ip.get(ip)
+                if not username:
+                    continue
+                sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
+                devices_by_user.setdefault(username, set()).add(ip)
+        else:
+            for ip, username in user_by_ip.items():
+                sessions_by_user[username] = sessions_by_user.get(username, 0) + 1
+                devices_by_user.setdefault(username, set()).add(ip)
 
         result: dict[str, tuple[int, int, int]] = {}
-        for username, user_ips in ips_by_user.items():
-            if live_ips is not None:
-                recent_ips = {
-                    ip for ip, ts in user_ips.items()
-                    if now_epoch - ts <= _RECENT_CONNECT_SECONDS
-                }
-                alive_ips = {ip for ip in user_ips if ip in live_ips}
-                reference_ips = recent_ips | alive_ips
-            else:
-                reference_ips = set(user_ips)
-
-            if not reference_ips:
-                # Ni conntrack ni un connect reciente confirman la IP: usuario
-                # desconectado, no reportarlo.
-                continue
-
-            devices = len(reference_ips)
-            sessions = devices
-            age = max(0, now_epoch - max(user_ips[ip] for ip in reference_ips))
+        for username, sessions in sessions_by_user.items():
+            devices = len(devices_by_user.get(username, set()))
+            age = max(0, now_epoch - last_seen_by_user.get(username, now_epoch))
             result[username] = (sessions, devices, age)
         return result
 
